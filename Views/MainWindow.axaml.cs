@@ -1,4 +1,4 @@
-using System;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.VisualTree;
@@ -58,10 +58,12 @@ public partial class MainWindow : Window
         if (canvas == null || ReferenceEquals(canvas, _wiredCanvas)) return;
 
         _wiredCanvas = canvas;
-        canvas.OnNodeClicked = async url =>
+
+        // O callback agora recebe (url, node) — o nó é usado como pai no grafo
+        canvas.OnNodeClicked = async (url, node) =>
         {
             if (DataContext is MainWindowViewModel vm)
-                await vm.NavigateToUrl(url);
+                await vm.NavigateToUrl(url, node);
         };
     }
 }

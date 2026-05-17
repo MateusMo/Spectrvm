@@ -17,6 +17,40 @@ public partial class BrowserService
         MaxAutomaticRedirections = 5
     });
 
+    // ── Domínios conhecidos por categoria ────────────────────────────────────
+
+    private static readonly HashSet<string> KnownTrackers = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "google-analytics.com", "analytics.google.com", "googletagmanager.com",
+        "doubleclick.net", "googlesyndication.com", "facebook.net", "connect.facebook.net",
+        "pixel.facebook.com", "hotjar.com", "clarity.ms", "mouseflow.com",
+        "mixpanel.com", "segment.com", "amplitude.com", "heap.io",
+        "fullstory.com", "logrocket.com", "crazyegg.com", "optimizely.com",
+        "omtrdc.net", "demdex.net", "scorecardresearch.com", "quantserve.com",
+        "taboola.com", "outbrain.com", "criteo.com", "adroll.com",
+        "pardot.com", "hubspot.com", "intercom.io", "drift.com",
+        "pingdom.net", "nr-data.net", "newrelic.com"
+    };
+
+    private static readonly HashSet<string> KnownCdns = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "cloudflare.com", "cloudflareinsights.com", "akamai.com", "akamaized.net",
+        "akamaitech.net", "fastly.net", "cdn.jsdelivr.net", "unpkg.com",
+        "cdnjs.cloudflare.com", "bootstrapcdn.com", "jquery.com",
+        "googleapis.com", "gstatic.com", "google.com", "googleusercontent.com",
+        "fontawesome.com", "use.fontawesome.com", "kit.fontawesome.com",
+        "amazonaws.com", "s3.amazonaws.com", "cloudfront.net",
+        "azureedge.net", "msecnd.net", "cdn.shopify.com", "shopifycloud.com"
+    };
+
+    private static readonly HashSet<string> SuspiciousPatterns = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "bit.ly", "tinyurl.com", "t.co", "ow.ly", "goo.gl",
+        "cutt.ly", "rebrand.ly", "short.io"
+    };
+
+    // ── Navegação ────────────────────────────────────────────────────────────
+
     public async Task<BrowserResult> NavigateAsync(string url)
     {
         if (!url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
@@ -30,14 +64,16 @@ public partial class BrowserService
 
         return new BrowserResult
         {
-            Html         = html,
-            CurlCommand  = BuildCurl(url, request),
-            RequestInfo  = BuildRequestInfo(response),
-            Links        = ExtractLinks(html, url),
-            StatusCode   = (int)response.StatusCode,
-            ContentType  = response.Content.Headers.ContentType?.ToString() ?? ""
+            Html        = html,
+            CurlCommand = BuildCurl(url, request),
+            RequestInfo = BuildRequestInfo(response),
+            Links       = ExtractLinks(html, url),
+            StatusCode  = (int)response.StatusCode,
+            ContentType = response.Content.Headers.ContentType?.ToString() ?? ""
         };
     }
+
+    // ── Curl / Headers ───────────────────────────────────────────────────────
 
     private static string BuildCurl(string url, HttpRequestMessage request)
     {
@@ -61,15 +97,20 @@ public partial class BrowserService
         return sb.ToString();
     }
 
+    // ── Extração de links ────────────────────────────────────────────────────
+
     private static List<ExtractedLink> ExtractLinks(string html, string currentUrl)
     {
-        var host  = new Uri(currentUrl).Host;
-        var seen  = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var list  = new List<ExtractedLink>();
+        if (!Uri.TryCreate(currentUrl, UriKind.Absolute, out var baseUri))
+            return new List<ExtractedLink>();
+
+        var host = baseUri.Host;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var list = new List<ExtractedLink>();
 
         foreach (Match m in LinkRegex().Matches(html))
         {
-            var raw = m.Value.TrimEnd('"', '\'', ')');
+            var raw = m.Value.TrimEnd('"', '\'', ')', '>');
             if (!seen.Add(raw)) continue;
             if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri)) continue;
 
@@ -77,21 +118,79 @@ public partial class BrowserService
             {
                 Url        = raw,
                 IsInternal = uri.Host.Equals(host, StringComparison.OrdinalIgnoreCase),
-                Type       = DetectType(raw)
+                Type       = DetectType(raw),
+                Kind       = ClassifyKind(uri, host)
             });
         }
 
         return list;
     }
 
+    // ── Classificação ────────────────────────────────────────────────────────
+
     private static string DetectType(string url) => url switch
     {
         _ when url.EndsWith(".js",  StringComparison.OrdinalIgnoreCase) => "js",
         _ when url.EndsWith(".css", StringComparison.OrdinalIgnoreCase) => "css",
-        _ when url.EndsWith(".png") || url.EndsWith(".jpg") || url.EndsWith(".svg") => "asset",
-        _ when url.Contains("/api/") => "api",
+        _ when url.EndsWith(".png", StringComparison.OrdinalIgnoreCase)
+            || url.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase)
+            || url.EndsWith(".svg", StringComparison.OrdinalIgnoreCase)
+            || url.EndsWith(".webp", StringComparison.OrdinalIgnoreCase)
+            || url.EndsWith(".gif", StringComparison.OrdinalIgnoreCase) => "asset",
+        _ when url.Contains("/api/", StringComparison.OrdinalIgnoreCase)
+            || url.Contains("graphql", StringComparison.OrdinalIgnoreCase)
+            || url.Contains("/rest/", StringComparison.OrdinalIgnoreCase) => "api",
         _ => "page"
     };
+
+    public static NodeKind ClassifyKind(Uri uri, string originHost)
+    {
+        var host = uri.Host.ToLowerInvariant();
+
+        // Remove www. para comparação
+        var bareHost   = host.StartsWith("www.") ? host[4..] : host;
+        var bareOrigin = originHost.ToLowerInvariant();
+        if (bareOrigin.StartsWith("www.")) bareOrigin = bareOrigin[4..];
+
+        // API
+        if (uri.AbsolutePath.Contains("/api/", StringComparison.OrdinalIgnoreCase)
+            || host.StartsWith("api.")
+            || uri.AbsolutePath.Contains("graphql", StringComparison.OrdinalIgnoreCase)
+            || uri.AbsolutePath.Contains("/rest/",  StringComparison.OrdinalIgnoreCase))
+            return NodeKind.Api;
+
+        // Tracker
+        if (IsMatch(bareHost, KnownTrackers))
+            return NodeKind.Tracker;
+
+        // CDN
+        if (IsMatch(bareHost, KnownCdns))
+            return NodeKind.Cdn;
+
+        // Suspeito (shorteners, etc.)
+        if (IsMatch(bareHost, SuspiciousPatterns))
+            return NodeKind.Suspicious;
+
+        // Interno
+        if (bareHost == bareOrigin || bareHost.EndsWith("." + bareOrigin))
+            return NodeKind.Internal;
+
+        // Externo genérico
+        return NodeKind.External;
+    }
+
+    private static bool IsMatch(string host, HashSet<string> set)
+    {
+        if (set.Contains(host)) return true;
+        // Verifica sufixos — ex: "cdn.cloudflare.com" → "cloudflare.com"
+        var parts = host.Split('.');
+        for (int i = 1; i < parts.Length - 1; i++)
+        {
+            var suffix = string.Join('.', parts[i..]);
+            if (set.Contains(suffix)) return true;
+        }
+        return false;
+    }
 
     [GeneratedRegex(@"https?://[^\s""'<>\)]+", RegexOptions.IgnoreCase)]
     private static partial Regex LinkRegex();

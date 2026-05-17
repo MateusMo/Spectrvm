@@ -46,15 +46,20 @@ public class MainWindowViewModel : ViewModelBase
     {
         if (SelectedTab is not { } tab) return;
         if (string.IsNullOrWhiteSpace(tab.CurrentUrl)) return;
-        await DoNavigate(tab, tab.CurrentUrl);
+
+        // Navegação pela barra de endereço: sem nó pai — cresce na cadeia principal
+        await DoNavigate(tab, tab.CurrentUrl, parentNode: null);
     }
 
-    /// <summary>Chamado pelo clique num nó do grafo.</summary>
-    public async Task NavigateToUrl(string url)
+    /// <summary>
+    /// Chamado pelo clique num nó do grafo.
+    /// Recebe a URL e o próprio nó clicado para usá-lo como pai no grafo.
+    /// </summary>
+    public async Task NavigateToUrl(string url, NavigationNode? fromNode = null)
     {
         if (SelectedTab is not { } tab) return;
         tab.CurrentUrl = url;
-        await DoNavigate(tab, url);
+        await DoNavigate(tab, url, parentNode: fromNode);
     }
 
     /// <summary>Alterna a ordenação dos links extraídos por Type.</summary>
@@ -76,7 +81,7 @@ public class MainWindowViewModel : ViewModelBase
         };
     }
 
-    private async Task DoNavigate(BrowserTab tab, string url)
+    private async Task DoNavigate(BrowserTab tab, string url, NavigationNode? parentNode)
     {
         tab.IsLoading = true;
         try
@@ -90,8 +95,9 @@ public class MainWindowViewModel : ViewModelBase
             if (tab.History.Count == 0 || tab.History[^1] != url)
                 tab.History.Add(url);
 
+            // Passa o nó pai para que as órbitas nasçam a partir dele
             tab.GraphNodes = _graph.AppendNavigation(
-                tab.GraphNodes, url, result.Links);
+                tab.GraphNodes, url, result.Links, parentNode);
         }
         catch (Exception ex)
         {
