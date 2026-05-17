@@ -1,0 +1,273 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Spectrvm.ViewModels"
+        xmlns:models="using:Spectrvm.Models"
+        xmlns:conv="using:Spectrvm.Converters"
+        xmlns:controls="using:Spectrvm.Controls"
+        x:Class="Spectrvm.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="SPECTRVM 👻"
+        Width="1400" Height="900" MinWidth="900" MinHeight="600"
+        Background="#080b10">
+
+    <Window.Styles>
+        <Style Selector="TextBlock, SelectableTextBlock">
+            <Setter Property="Foreground" Value="#c9d1e0"/>
+        </Style>
+        <Style Selector="TextBox.address">
+            <Setter Property="Background"      Value="#111620"/>
+            <Setter Property="Foreground"      Value="#e0eaff"/>
+            <Setter Property="BorderBrush"     Value="#1e2a3a"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius"    Value="6"/>
+            <Setter Property="Padding"         Value="10,6"/>
+            <Setter Property="FontFamily"      Value="Courier New"/>
+            <Setter Property="FontSize"        Value="13"/>
+            <Setter Property="CaretBrush"      Value="#4fc3f7"/>
+        </Style>
+        <Style Selector="ComboBox.mode">
+            <Setter Property="Background"  Value="#111620"/>
+            <Setter Property="Foreground"  Value="#4fc3f7"/>
+            <Setter Property="BorderBrush" Value="#1e2a3a"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="FontFamily"  Value="Courier New"/>
+            <Setter Property="FontSize"    Value="12"/>
+            <Setter Property="MinWidth"    Value="140"/>
+        </Style>
+        <Style Selector="Button.go">
+            <Setter Property="Background"   Value="#1565c0"/>
+            <Setter Property="Foreground"   Value="White"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding"      Value="18,6"/>
+            <Setter Property="FontWeight"   Value="Bold"/>
+            <Setter Property="Cursor"       Value="Hand"/>
+        </Style>
+        <Style Selector="Button.go:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#1976d2"/>
+        </Style>
+        <Style Selector="Button.addtab">
+            <Setter Property="Background"      Value="#131b26"/>
+            <Setter Property="Foreground"      Value="#4fc3f7"/>
+            <Setter Property="BorderBrush"     Value="#1e2a3a"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius"    Value="6"/>
+            <Setter Property="Padding"         Value="12,6"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+        </Style>
+        <Style Selector="Button.sort">
+            <Setter Property="Background"      Value="#0d1a28"/>
+            <Setter Property="Foreground"      Value="#546e7a"/>
+            <Setter Property="BorderBrush"     Value="#1e2a3a"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius"    Value="4"/>
+            <Setter Property="Padding"         Value="8,3"/>
+            <Setter Property="FontFamily"      Value="Courier New"/>
+            <Setter Property="FontSize"        Value="10"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+        </Style>
+        <Style Selector="Button.sort:pointerover /template/ ContentPresenter">
+            <Setter Property="Foreground" Value="#4fc3f7"/>
+        </Style>
+        <Style Selector="TabItem">
+            <Setter Property="Background" Value="#0d1520"/>
+            <Setter Property="Foreground" Value="#7a8fa8"/>
+            <Setter Property="FontFamily" Value="Courier New"/>
+            <Setter Property="FontSize"   Value="12"/>
+            <Setter Property="Padding"    Value="12,6"/>
+        </Style>
+        <Style Selector="TabItem:selected">
+            <Setter Property="Background" Value="#111e30"/>
+            <Setter Property="Foreground" Value="#e0eaff"/>
+        </Style>
+        <Style Selector="Button.closetab">
+            <Setter Property="Background"        Value="Transparent"/>
+            <Setter Property="Foreground"        Value="#4a6070"/>
+            <Setter Property="Padding"           Value="3,0"/>
+            <Setter Property="FontSize"          Value="12"/>
+            <Setter Property="Cursor"            Value="Hand"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="Button.closetab:pointerover /template/ ContentPresenter">
+            <Setter Property="Foreground" Value="#ef5350"/>
+        </Style>
+        <Style Selector="SelectableTextBlock.mono">
+            <Setter Property="FontFamily" Value="Courier New"/>
+            <Setter Property="FontSize"   Value="12"/>
+            <Setter Property="Foreground" Value="#b0c8e8"/>
+        </Style>
+        <Style Selector="SelectableTextBlock.link">
+            <Setter Property="Foreground"   Value="#26a69a"/>
+            <Setter Property="FontFamily"   Value="Courier New"/>
+            <Setter Property="FontSize"     Value="11"/>
+            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+        </Style>
+        <Style Selector="TextBlock.seclabel">
+            <Setter Property="Foreground" Value="#546e7a"/>
+            <Setter Property="FontFamily" Value="Courier New"/>
+            <Setter Property="FontSize"   Value="10"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Margin"     Value="0,0,0,6"/>
+        </Style>
+    </Window.Styles>
+
+    <Grid RowDefinitions="Auto,2,*">
+
+        <!-- TOP BAR -->
+        <Border Grid.Row="0"
+                Background="#0a0f18"
+                BorderBrush="#121c2a"
+                BorderThickness="0,0,0,1"
+                Padding="12,8">
+            <Grid ColumnDefinitions="*,10,Auto,10,Auto,10,Auto">
+                <TextBox Grid.Column="0"
+                         Classes="address"
+                         Text="{Binding SelectedTab.CurrentUrl}"
+                         Watermark="https://exemplo.com"
+                         KeyDown="OnUrlKeyDown"/>
+                <ComboBox Grid.Column="2"
+                          Classes="mode"
+                          ItemsSource="{Binding ViewModes}"
+                          SelectedItem="{Binding SelectedTab.ViewMode}"/>
+                <Button Grid.Column="4" Classes="go" Content="GO" Click="OnNavigate"/>
+                <Button Grid.Column="6" Classes="addtab" Content="+ TAB" Click="OnAddTab"/>
+            </Grid>
+        </Border>
+
+        <!-- LOADING -->
+        <ProgressBar Grid.Row="1"
+                     IsIndeterminate="True"
+                     IsVisible="{Binding SelectedTab.IsLoading}"
+                     Foreground="#1565c0"
+                     Background="Transparent"/>
+
+        <!-- TABS -->
+        <TabControl Grid.Row="2"
+                    ItemsSource="{Binding Tabs}"
+                    SelectedItem="{Binding SelectedTab}"
+                    Background="#080b10">
+
+            <TabControl.ItemTemplate>
+                <DataTemplate x:DataType="models:BrowserTab">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="{Binding Title}"
+                                   MaxWidth="130"
+                                   TextTrimming="CharacterEllipsis"
+                                   VerticalAlignment="Center"/>
+                        <Button Classes="closetab" Content="×"
+                                Tag="{Binding}" Click="OnCloseTab"/>
+                    </StackPanel>
+                </DataTemplate>
+            </TabControl.ItemTemplate>
+
+            <TabControl.ContentTemplate>
+                <DataTemplate x:DataType="models:BrowserTab">
+                    <Grid Background="#080b10">
+
+                        <!-- INTERPRETER -->
+                        <ScrollViewer Padding="14"
+                                      IsVisible="{Binding ViewMode, Converter={x:Static conv:ViewModeConverters.Interpreter}}">
+                            <Border Background="#0d1318" CornerRadius="8" Padding="14">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Classes="seclabel" Text="HTML SOURCE"/>
+                                    <SelectableTextBlock Classes="mono"
+                                                         Text="{Binding Result.Html}"
+                                                         TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Border>
+                        </ScrollViewer>
+
+                        <!-- CURL -->
+                        <ScrollViewer Padding="14"
+                                      IsVisible="{Binding ViewMode, Converter={x:Static conv:ViewModeConverters.Curl}}">
+                            <StackPanel Spacing="10">
+                                <Border Background="#0d1318" CornerRadius="8" Padding="14">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Classes="seclabel" Text="CURL COMMAND"/>
+                                        <SelectableTextBlock Classes="mono"
+                                                             Foreground="#80cbc4"
+                                                             Text="{Binding Result.CurlCommand}"
+                                                             TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border Background="#0d1318" CornerRadius="8" Padding="14">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Classes="seclabel" Text="RESPONSE HEADERS"/>
+                                        <SelectableTextBlock Classes="mono"
+                                                             Text="{Binding Result.RequestInfo}"
+                                                             TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+
+                        <!-- LINKS -->
+                        <ScrollViewer Padding="14"
+                                      IsVisible="{Binding ViewMode, Converter={x:Static conv:ViewModeConverters.Links}}">
+                            <Border Background="#0d1318" CornerRadius="8" Padding="14">
+                                <StackPanel Spacing="6">
+                                    <!-- Header com botão sort -->
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <TextBlock Classes="seclabel" Text="EXTRACTED LINKS" VerticalAlignment="Center"/>
+                                        <Button Grid.Column="1"
+                                                Classes="sort"
+                                                Content="↕ TYPE"
+                                                Click="OnSortLinks"/>
+                                    </Grid>
+                                    <ItemsControl ItemsSource="{Binding Result.Links}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="models:ExtractedLink">
+                                                <Grid ColumnDefinitions="52,*" Margin="0,2">
+                                                    <Border Background="#0a1520"
+                                                            CornerRadius="3"
+                                                            Padding="4,2"
+                                                            HorizontalAlignment="Left">
+                                                        <TextBlock Text="{Binding Type}"
+                                                                   FontFamily="Courier New"
+                                                                   FontSize="9"
+                                                                   Foreground="#546e7a"/>
+                                                    </Border>
+                                                    <SelectableTextBlock Grid.Column="1"
+                                                                         Classes="link"
+                                                                         Text="{Binding Url}"
+                                                                         Margin="8,0,0,0"/>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
+                        </ScrollViewer>
+
+                        <!-- HISTORY -->
+                        <ScrollViewer Padding="14"
+                                      IsVisible="{Binding ViewMode, Converter={x:Static conv:ViewModeConverters.History}}">
+                            <Border Background="#0d1318" CornerRadius="8" Padding="14">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Classes="seclabel" Text="NAVIGATION HISTORY"/>
+                                    <ItemsControl ItemsSource="{Binding History}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="x:String">
+                                                <SelectableTextBlock Classes="link"
+                                                                     Text="{Binding}"
+                                                                     Margin="0,3"/>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
+                        </ScrollViewer>
+
+                        <!-- NAVIGATOR -->
+                        <Border Background="#060a0f"
+                                IsVisible="{Binding ViewMode, Converter={x:Static conv:ViewModeConverters.Navigator}}">
+                            <controls:GraphCanvas x:Name="TheGraph"
+                                                  Nodes="{Binding GraphNodes}"/>
+                        </Border>
+
+                    </Grid>
+                </DataTemplate>
+            </TabControl.ContentTemplate>
+
+        </TabControl>
+    </Grid>
+</Window>

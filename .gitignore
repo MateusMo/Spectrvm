@@ -1,0 +1,127 @@
+# =========================
+# BUILD
+# =========================
+
+bin/
+obj/
+
+# =========================
+# DOTNET
+# =========================
+
+TestResults/
+*.nupkg
+*.snupkg
+*.cache
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# =========================
+# RIDER / JETBRAINS
+# =========================
+
+.idea/
+*.sln.iml
+
+# Rider local history
+.localhistory/
+
+# JetBrains caches
+.idea_modules/
+
+# =========================
+# VSCODE
+# =========================
+
+.vscode/
+
+# =========================
+# VISUAL STUDIO
+# =========================
+
+.vs/
+
+*.user
+*.suo
+*.userprefs
+*.csproj.user
+*.sln.docstates
+
+# =========================
+# OS FILES
+# =========================
+
+.DS_Store
+Thumbs.db
+
+# Linux
+*~
+
+# =========================
+# LOGS
+# =========================
+
+*.log
+
+# =========================
+# TEMP
+# =========================
+
+tmp/
+temp/
+*.tmp
+
+# =========================
+# PUBLISH
+# =========================
+
+publish/
+
+# =========================
+# CACHE
+# =========================
+
+.cache/
+
+# =========================
+# SQLITE / LOCAL DATA
+# =========================
+
+*.db
+*.sqlite
+*.sqlite3
+
+# =========================
+# ENV
+# =========================
+
+.env
+.env.local
+
+# =========================
+# NODEJS / FUTURE WEBVIEW
+# =========================
+
+node_modules/
+
+# =========================
+# CRASH DUMPS
+# =========================
+
+*.dmp
+*.stackdump
+
+# =========================
+# COVERAGE
+# =========================
+
+coverage/
+*.coverage
+*.coveragexml
+
+# =========================
+# AVALONIA
+# =========================
+
+AvaloniaDiagnostics/
