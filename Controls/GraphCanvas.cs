@@ -4,6 +4,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Media.Immutable;
 using Avalonia.Threading;
 using Spectrvm.Models;
 
@@ -19,49 +20,202 @@ public class GraphCanvas : Control
     public List<NavigationNode>? Nodes
     {
         get => GetValue(NodesProperty);
-        set => SetValue(NodesProperty, value);
+        set
+        {
+            SetValue(NodesProperty, value);
+            _labelCache.Clear();          // invalida cache de labels ao trocar os nós
+            UpdateTimerState(value);
+            InvalidateVisual();
+        }
     }
 
-    /// <summary>
-    /// Callback: (url, node) — devolve o nó clicado para ser usado como pai no grafo.
-    /// </summary>
     public Action<string, NavigationNode>? OnNodeClicked { get; set; }
+
+    // ── Brushes / Pens ESTÁTICOS (zero alocação por frame) ──────────────────
+
+    // Fundos
+    private static readonly ImmutableSolidColorBrush BgBrush   = new(Color.FromRgb(11, 16, 32));
+    private static readonly ImmutableSolidColorBrush GridBrush  = new(Color.FromArgb(18, 255, 255, 255));
+
+    // Arestas de navegação
+    private static readonly Pen ChainEdgePen = new(
+        new ImmutableSolidColorBrush(Color.FromArgb(210, 59, 130, 246)), 2.0)
+        { DashStyle = DashStyle.Dash };
+
+    private static readonly Pen NavEdgePen = new(
+        new ImmutableSolidColorBrush(Color.FromArgb(230, 255, 255, 255)), 2.2);
+
+    // Cores por NodeKind (fills sólidos)
+    private static readonly ImmutableSolidColorBrush[] KindFills = new ImmutableSolidColorBrush[]
+    {
+        new(Color.FromRgb(59,  130, 246)),  // Primary
+        new(Color.FromRgb(34,  197, 94)),   // Internal
+        new(Color.FromRgb(100, 160, 220)),  // External
+        new(Color.FromRgb(249, 115, 22)),   // Dependency
+        new(Color.FromRgb(239, 68,  68)),   // Tracker
+        new(Color.FromRgb(6,   182, 212)),  // Cdn
+        new(Color.FromRgb(234, 179, 8)),    // Api
+        new(Color.FromRgb(168, 85,  247)),  // Suspicious
+    };
+
+    // Brushes de aresta por NodeKind (semi-transparentes)
+    private static readonly ImmutableSolidColorBrush[] OrbitEdgeBrushes = new ImmutableSolidColorBrush[]
+    {
+        new(Color.FromArgb(80, 59,  130, 246)),
+        new(Color.FromArgb(80, 34,  197, 94)),
+        new(Color.FromArgb(80, 100, 160, 220)),
+        new(Color.FromArgb(80, 249, 115, 22)),
+        new(Color.FromArgb(80, 239, 68,  68)),
+        new(Color.FromArgb(80, 6,   182, 212)),
+        new(Color.FromArgb(80, 234, 179, 8)),
+        new(Color.FromArgb(80, 168, 85,  247)),
+    };
+
+    // Pens de aresta por NodeKind (sólido e tracejado, pré-alocados)
+    private static readonly Pen[] OrbitEdgePensSolid;
+    private static readonly Pen[] OrbitEdgePensDash;
+
+    // Halos por NodeKind (muito transparentes)
+    private static readonly ImmutableSolidColorBrush[] HaloBrushes = new ImmutableSolidColorBrush[]
+    {
+        new(Color.FromArgb(38, 59,  130, 246)),
+        new(Color.FromArgb(20, 34,  197, 94)),
+        new(Color.FromArgb(20, 100, 160, 220)),
+        new(Color.FromArgb(20, 249, 115, 22)),
+        new(Color.FromArgb(20, 239, 68,  68)),
+        new(Color.FromArgb(20, 6,   182, 212)),
+        new(Color.FromArgb(20, 234, 179, 8)),
+        new(Color.FromArgb(20, 168, 85,  247)),
+    };
+
+    // Brushes de label por NodeKind
+    private static readonly ImmutableSolidColorBrush[] LabelBrushes = new ImmutableSolidColorBrush[]
+    {
+        new(Color.FromArgb(215, 59,  130, 246)),
+        new(Color.FromArgb(215, 34,  197, 94)),
+        new(Color.FromArgb(215, 100, 160, 220)),
+        new(Color.FromArgb(215, 249, 115, 22)),
+        new(Color.FromArgb(215, 239, 68,  68)),
+        new(Color.FromArgb(215, 6,   182, 212)),
+        new(Color.FromArgb(215, 234, 179, 8)),
+        new(Color.FromArgb(215, 168, 85,  247)),
+    };
+
+    // Legendas
+    private static readonly (NodeKind kind, string label)[] LegendItems =
+    {
+        (NodeKind.Primary,    "primary"),
+        (NodeKind.Internal,   "internal"),
+        (NodeKind.External,   "external"),
+        (NodeKind.Api,        "api"),
+        (NodeKind.Cdn,        "cdn"),
+        (NodeKind.Dependency, "dependency"),
+        (NodeKind.Tracker,    "tracker"),
+        (NodeKind.Suspicious, "suspicious"),
+    };
+
+    private static readonly ImmutableSolidColorBrush LabelBg =
+        new(Color.FromArgb(175, 11, 16, 32));
+
+    private static readonly ImmutableSolidColorBrush HintBrush =
+        new(Color.FromArgb(60, 200, 220, 255));
+
+    private static readonly ImmutableSolidColorBrush HudBrush =
+        new(Color.FromArgb(45, 200, 220, 255));
+
+    private static readonly Typeface MonoFont = new("Courier New");
 
     static GraphCanvas()
     {
-        NodesProperty.Changed.AddClassHandler<GraphCanvas>((c, _) => c.InvalidateVisual());
+        // Inicializa pens de aresta pré-alocados
+        int n = KindFills.Length;
+        OrbitEdgePensSolid = new Pen[n];
+        OrbitEdgePensDash  = new Pen[n];
+        for (int i = 0; i < n; i++)
+        {
+            OrbitEdgePensSolid[i] = new Pen(OrbitEdgeBrushes[i], 0.8);
+            OrbitEdgePensDash[i]  = new Pen(OrbitEdgeBrushes[i], 0.8) { DashStyle = DashStyle.Dash };
+        }
+
         FocusableProperty.OverrideDefaultValue<GraphCanvas>(true);
         ClipToBoundsProperty.OverrideDefaultValue<GraphCanvas>(true);
     }
 
-    // ── Animação ─────────────────────────────────────────────────────────────
+    // ── Cache de FormattedText ────────────────────────────────────────────────
+
+    // Chave: (url, isPrimary) → FormattedText pronto
+    private readonly Dictionary<(string, bool), FormattedText> _labelCache = new();
+
+    private FormattedText GetLabel(NavigationNode node)
+    {
+        var key = (node.Url, node.IsPrimary);
+        if (_labelCache.TryGetValue(key, out var cached)) return cached;
+
+        var ft = new FormattedText(
+            ShortenUrl(node.Url),
+            System.Globalization.CultureInfo.InvariantCulture,
+            FlowDirection.LeftToRight,
+            MonoFont,
+            node.IsPrimary ? 11.0 : 8.0,
+            LabelBrushes[(int)node.Kind]);
+
+        _labelCache[key] = ft;
+        return ft;
+    }
+
+    // ── Animação — timer só ativo se há nós animados ─────────────────────────
 
     private DispatcherTimer? _pulseTimer;
     private double           _pulsePhase;
 
-    private void EnsurePulseTimer()
+    private static bool NeedsAnimation(List<NavigationNode>? nodes)
     {
-        if (_pulseTimer != null) return;
-        _pulseTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(33) };
-        _pulseTimer.Tick += (_, _) =>
+        if (nodes == null) return false;
+        foreach (var n in nodes)
+            if (n.IsPrimary || n.Kind == NodeKind.Tracker || n.Kind == NodeKind.Suspicious)
+                return true;
+        return false;
+    }
+
+    private void UpdateTimerState(List<NavigationNode>? nodes)
+    {
+        bool needs = NeedsAnimation(nodes);
+
+        if (needs && _pulseTimer == null)
         {
-            _pulsePhase = (_pulsePhase + 0.07) % (2 * Math.PI);
-            InvalidateVisual();
-        };
-        _pulseTimer.Start();
+            _pulseTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) }; // 20fps — suficiente para pulso suave
+            _pulseTimer.Tick += OnPulseTick;
+            _pulseTimer.Start();
+        }
+        else if (!needs && _pulseTimer != null)
+        {
+            _pulseTimer.Stop();
+            _pulseTimer.Tick -= OnPulseTick;
+            _pulseTimer = null;
+        }
+    }
+
+    private void OnPulseTick(object? sender, EventArgs e)
+    {
+        _pulsePhase = (_pulsePhase + 0.10) % (2 * Math.PI);
+        InvalidateVisual();
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
-        EnsurePulseTimer();
+        UpdateTimerState(Nodes);
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnDetachedFromVisualTree(e);
-        _pulseTimer?.Stop();
-        _pulseTimer = null;
+        if (_pulseTimer != null)
+        {
+            _pulseTimer.Stop();
+            _pulseTimer.Tick -= OnPulseTick;
+            _pulseTimer = null;
+        }
     }
 
     // ── Viewport ─────────────────────────────────────────────────────────────
@@ -114,7 +268,6 @@ public class GraphCanvas : Control
         if (!props.IsLeftButtonPressed) return;
 
         var hit = HitTest(ToWorld(pos));
-
         if (hit != null)
         {
             _isDraggingNode   = true;
@@ -186,11 +339,8 @@ public class GraphCanvas : Control
 
     // ── HitTest ──────────────────────────────────────────────────────────────
 
-    private NavigationNode? HitTest(Point world)
+    private static NavigationNode? HitTest(Point world, List<NavigationNode> nodes)
     {
-        var nodes = Nodes;
-        if (nodes == null) return null;
-
         foreach (var node in nodes)
         {
             double r  = VisualRadius(node) + 6;
@@ -201,13 +351,17 @@ public class GraphCanvas : Control
         return null;
     }
 
-    // ── View helpers ─────────────────────────────────────────────────────────
+    private NavigationNode? HitTest(Point world)
+    {
+        var nodes = Nodes;
+        return nodes == null ? null : HitTest(world, nodes);
+    }
+
+    // ── View ─────────────────────────────────────────────────────────────────
 
     private void ResetView()
     {
-        _scale   = 1.0;
-        _offsetX = 0;
-        _offsetY = 0;
+        _scale = 1.0; _offsetX = 0; _offsetY = 0;
         InvalidateVisual();
     }
 
@@ -236,30 +390,13 @@ public class GraphCanvas : Control
         _scale   = Math.Clamp(Math.Min(w / graphW, h / graphH), MinScale, MaxScale);
         _offsetX = (w - graphW * _scale) / 2 - (minX - pad) * _scale;
         _offsetY = (h - graphH * _scale) / 2 - (minY - pad) * _scale;
-
         InvalidateVisual();
     }
 
-    // ── NodeKind → visual ────────────────────────────────────────────────────
+    // ── Helpers visuais ───────────────────────────────────────────────────────
 
-    private static Color KindColor(NodeKind kind) => kind switch
-    {
-        NodeKind.Primary    => Color.FromRgb(59,  130, 246),
-        NodeKind.Internal   => Color.FromRgb(34,  197, 94),
-        NodeKind.External   => Color.FromRgb(100, 160, 220),
-        NodeKind.Dependency => Color.FromRgb(249, 115, 22),
-        NodeKind.Tracker    => Color.FromRgb(239, 68,  68),
-        NodeKind.Cdn        => Color.FromRgb(6,   182, 212),
-        NodeKind.Api        => Color.FromRgb(234, 179, 8),
-        NodeKind.Suspicious => Color.FromRgb(168, 85,  247),
-        _                   => Color.FromRgb(100, 160, 220)
-    };
-
-    private static double VisualRadius(NavigationNode n) => n.Kind switch
-    {
-        NodeKind.Primary => 11,
-        _                => 6
-    };
+    private static double VisualRadius(NavigationNode n) =>
+        n.Kind == NodeKind.Primary ? 11.0 : 6.0;
 
     private static bool IsFastPulse(NodeKind k) =>
         k == NodeKind.Tracker || k == NodeKind.Suspicious;
@@ -269,24 +406,11 @@ public class GraphCanvas : Control
 
     // ── Render ───────────────────────────────────────────────────────────────
 
-    // Aresta cadeia principal (azul tracejado)
-    private static readonly Pen ChainEdgePen = new(
-        new SolidColorBrush(Color.FromArgb(210, 59, 130, 246)), 2.0)
-        { DashStyle = DashStyle.Dash };
-
-    // Aresta de navegação por clique de órbita (branco brilhante, sólido, mais grosso)
-    private static readonly Pen NavEdgePen = new(
-        new SolidColorBrush(Color.FromArgb(230, 255, 255, 255)), 2.2);
-
-    private static readonly Typeface MonoFont = new("Courier New");
-    private static readonly IBrush   BgBrush  = new SolidColorBrush(Color.FromRgb(11, 16, 32));
-    private static readonly IBrush   GridBrush = new SolidColorBrush(Color.FromArgb(18, 255, 255, 255));
-
     public override void Render(DrawingContext ctx)
     {
         base.Render(ctx);
-
         var bounds = Bounds;
+
         ctx.DrawRectangle(BgBrush, null, new Rect(bounds.Size));
         DrawGrid(ctx, bounds);
 
@@ -303,71 +427,53 @@ public class GraphCanvas : Control
 
         using (ctx.PushTransform(transform))
         {
-            // ── 1. Arestas de órbita (mais ao fundo) ─────────────────────────
+            // 1. Arestas de órbita
             foreach (var node in nodes)
             {
                 if (!node.IsPrimary) continue;
-
                 foreach (var orbit in node.OrbitNodes)
                 {
-                    var   ec    = KindColor(orbit.Kind);
-                    var   eb    = new SolidColorBrush(Color.FromArgb(80, ec.R, ec.G, ec.B));
-                    var   dash  = HasDashedEdge(orbit.Kind) ? DashStyle.Dash : DashStyle.Dot;
-                    var   pen   = new Pen(eb, 0.8) { DashStyle = dash };
+                    int ki  = (int)orbit.Kind;
+                    var pen = HasDashedEdge(orbit.Kind)
+                        ? OrbitEdgePensDash[ki]
+                        : OrbitEdgePensSolid[ki];
                     ctx.DrawLine(pen,
                         new Point(node.X, node.Y),
                         new Point(orbit.X, orbit.Y));
                 }
             }
 
-            // ── 2. Arestas de navegação (cadeia principal + clique em órbita) ─
+            // 2. Arestas de navegação
             foreach (var node in nodes)
             {
                 if (!node.IsPrimary || node.Next == null) continue;
 
-                // Se o filho tem Parent != este nó primário (veio de clique em órbita),
-                // desenha com NavEdgePen (branco sólido); senão usa ChainEdgePen.
                 bool viaOrbit = node.Next.Parent != null && !node.Next.Parent.IsPrimary;
                 var  edgePen  = viaOrbit ? NavEdgePen : ChainEdgePen;
+                double fromX  = viaOrbit && node.Next.Parent != null ? node.Next.Parent.X : node.X;
+                double fromY  = viaOrbit && node.Next.Parent != null ? node.Next.Parent.Y : node.Y;
 
-                // Ponto de origem: o nó clicado (Parent do filho) ou este primário
-                double fromX = viaOrbit && node.Next.Parent != null ? node.Next.Parent.X : node.X;
-                double fromY = viaOrbit && node.Next.Parent != null ? node.Next.Parent.Y : node.Y;
-
-                ctx.DrawLine(edgePen,
-                    new Point(fromX, fromY),
-                    new Point(node.Next.X, node.Next.Y));
-
-                // Seta na ponta (triângulo pequeno apontando pro filho)
-                DrawArrow(ctx, edgePen,
-                    new Point(fromX, fromY),
-                    new Point(node.Next.X, node.Next.Y));
+                ctx.DrawLine(edgePen, new Point(fromX, fromY), new Point(node.Next.X, node.Next.Y));
+                DrawArrow(ctx, edgePen.Brush!, new Point(fromX, fromY), new Point(node.Next.X, node.Next.Y));
             }
 
-            // ── 3. Nós + labels ──────────────────────────────────────────────
+            // 3. Nós + halos + labels
+            double pulse     = Math.Abs(Math.Sin(_pulsePhase));
+            double fastPulse = Math.Abs(Math.Sin(_pulsePhase * 2.8));
+
             foreach (var node in nodes)
             {
-                var    color = KindColor(node.Kind);
-                double r     = VisualRadius(node);
-
-                // Pulso animado
-                double pulseT  = IsFastPulse(node.Kind)
-                    ? Math.Abs(Math.Sin(_pulsePhase * 2.8))
-                    : Math.Abs(Math.Sin(_pulsePhase));
+                int    ki = (int)node.Kind;
+                double r  = VisualRadius(node);
+                double pt = IsFastPulse(node.Kind) ? fastPulse : pulse;
 
                 double haloBase = r + (node.IsPrimary ? 10 : 6);
-                double haloR    = haloBase + pulseT * (node.IsPrimary ? 7 : 3);
-                byte   haloA    = node.IsPrimary ? (byte)38 : (byte)18;
+                double haloR    = haloBase + pt * (node.IsPrimary ? 7 : 3);
 
-                ctx.DrawEllipse(
-                    new SolidColorBrush(Color.FromArgb(haloA, color.R, color.G, color.B)),
-                    null, new Point(node.X, node.Y), haloR, haloR);
+                ctx.DrawEllipse(HaloBrushes[ki], null, new Point(node.X, node.Y), haloR, haloR);
+                ctx.DrawEllipse(KindFills[ki],   null, new Point(node.X, node.Y), r,     r);
 
-                ctx.DrawEllipse(
-                    new SolidColorBrush(color), null,
-                    new Point(node.X, node.Y), r, r);
-
-                DrawLabel(ctx, node, color, r);
+                DrawLabel(ctx, node, r);
             }
         }
 
@@ -375,32 +481,27 @@ public class GraphCanvas : Control
         DrawHud(ctx, bounds);
     }
 
-    // ── Seta na ponta da aresta de navegação ──────────────────────────────────
+    // ── Seta ─────────────────────────────────────────────────────────────────
 
-    private static void DrawArrow(DrawingContext ctx, Pen pen, Point from, Point to)
+    private static readonly StreamGeometry _arrowGeom = new();
+
+    private static void DrawArrow(DrawingContext ctx, IBrush brush, Point from, Point to)
     {
-        double dx    = to.X - from.X;
-        double dy    = to.Y - from.Y;
-        double len   = Math.Sqrt(dx * dx + dy * dy);
+        double dx  = to.X - from.X;
+        double dy  = to.Y - from.Y;
+        double len = Math.Sqrt(dx * dx + dy * dy);
         if (len < 1) return;
 
-        double ux    = dx / len;
-        double uy    = dy / len;
+        double ux = dx / len, uy = dy / len;
+        double tx = to.X - ux * 13;
+        double ty = to.Y - uy * 13;
 
-        // Recua a ponta até a superfície do nó destino
-        double nodeR = 13;
-        double tx    = to.X - ux * nodeR;
-        double ty    = to.Y - uy * nodeR;
+        double bx1 = tx - ux * 10 - uy * 5;
+        double by1 = ty - uy * 10 + ux * 5;
+        double bx2 = tx - ux * 10 + uy * 5;
+        double by2 = ty - uy * 10 - ux * 5;
 
-        double arrowLen = 10;
-        double arrowW   = 5;
-
-        // Base do triângulo
-        double bx1 = tx - ux * arrowLen - uy * arrowW;
-        double by1 = ty - uy * arrowLen + ux * arrowW;
-        double bx2 = tx - ux * arrowLen + uy * arrowW;
-        double by2 = ty - uy * arrowLen - ux * arrowW;
-
+        // Reutiliza a geometria (recria apenas os pontos — sem alloc de objeto)
         var geom = new StreamGeometry();
         using (var sg = geom.Open())
         {
@@ -409,25 +510,15 @@ public class GraphCanvas : Control
             sg.LineTo(new Point(bx2, by2));
             sg.EndFigure(true);
         }
-
-        ctx.DrawGeometry(pen.Brush, null, geom);
+        ctx.DrawGeometry(brush, null, geom);
     }
 
-    // ── Label ────────────────────────────────────────────────────────────────
+    // ── Label ─────────────────────────────────────────────────────────────────
 
-    private static void DrawLabel(DrawingContext ctx, NavigationNode node, Color color, double r)
+    private void DrawLabel(DrawingContext ctx, NavigationNode node, double r)
     {
-        var    text     = ShortenUrl(node.Url);
-        double fontSize = node.IsPrimary ? 11.0 : 8.0;
-        var    brush    = new SolidColorBrush(Color.FromArgb(215, color.R, color.G, color.B));
+        var ft = GetLabel(node);
 
-        var ft = new FormattedText(
-            text,
-            System.Globalization.CultureInfo.InvariantCulture,
-            FlowDirection.LeftToRight,
-            MonoFont, fontSize, brush);
-
-        // Posição: primário sempre acima; órbita acima ou abaixo dependendo de onde está
         double lx = node.X - ft.Width / 2;
         double ly = node.IsPrimary
             ? node.Y - r - 15
@@ -435,17 +526,12 @@ public class GraphCanvas : Control
                 ? node.Y - r - 12
                 : node.Y + r + 3;
 
-        // Fundo do label
-        ctx.DrawRectangle(
-            new SolidColorBrush(Color.FromArgb(175, 11, 16, 32)),
-            null,
-            new Rect(lx - 3, ly - 1, ft.Width + 6, ft.Height + 2),
-            3, 3);
-
+        ctx.DrawRectangle(LabelBg, null,
+            new Rect(lx - 3, ly - 1, ft.Width + 6, ft.Height + 2), 3, 3);
         ctx.DrawText(ft, new Point(lx, ly));
     }
 
-    // ── Grid ─────────────────────────────────────────────────────────────────
+    // ── Grid / HUD / Hint / Legend ────────────────────────────────────────────
 
     private void DrawGrid(DrawingContext ctx, Rect bounds)
     {
@@ -460,67 +546,63 @@ public class GraphCanvas : Control
             ctx.DrawEllipse(GridBrush, null, new Point(x, y), 1, 1);
     }
 
-    // ── HUD / Hint ───────────────────────────────────────────────────────────
+    // Hint e HUD são raros (sem nós / static) — FormattedText criado uma vez por sessão
+    private FormattedText? _hintFt;
+    private FormattedText? _hudFt;
 
-    private static void DrawHint(DrawingContext ctx, Rect bounds)
+    private void DrawHint(DrawingContext ctx, Rect bounds)
     {
-        var ft = new FormattedText(
+        _hintFt ??= new FormattedText(
             "Navegue para uma URL para ver o grafo aparecer aqui",
             System.Globalization.CultureInfo.InvariantCulture,
-            FlowDirection.LeftToRight,
-            new Typeface("Courier New"), 13,
-            new SolidColorBrush(Color.FromArgb(60, 200, 220, 255)));
+            FlowDirection.LeftToRight, MonoFont, 13, HintBrush);
 
-        ctx.DrawText(ft, new Point(
-            bounds.Width  / 2 - ft.Width  / 2,
-            bounds.Height / 2 - ft.Height / 2));
+        ctx.DrawText(_hintFt, new Point(
+            bounds.Width  / 2 - _hintFt.Width  / 2,
+            bounds.Height / 2 - _hintFt.Height / 2));
     }
 
-    private static void DrawHud(DrawingContext ctx, Rect bounds)
+    private void DrawHud(DrawingContext ctx, Rect bounds)
     {
-        var ft = new FormattedText(
+        _hudFt ??= new FormattedText(
             "scroll = zoom  •  drag fundo = pan  •  drag nó = mover  •  clique nó = navegar  •  R = reset  •  F = fit",
             System.Globalization.CultureInfo.InvariantCulture,
-            FlowDirection.LeftToRight,
-            new Typeface("Courier New"), 9,
-            new SolidColorBrush(Color.FromArgb(45, 200, 220, 255)));
+            FlowDirection.LeftToRight, MonoFont, 9, HudBrush);
 
-        ctx.DrawText(ft, new Point(12, bounds.Height - ft.Height - 8));
+        ctx.DrawText(_hudFt, new Point(12, bounds.Height - _hudFt.Height - 8));
     }
 
-    // ── Legenda ───────────────────────────────────────────────────────────────
+    // Legenda também pré-computada
+    private (FormattedText ft, ImmutableSolidColorBrush dot)[]? _legendItems;
 
-    private static void DrawLegend(DrawingContext ctx, Rect bounds)
+    private void DrawLegend(DrawingContext ctx, Rect bounds)
     {
-        var items = new (NodeKind kind, string label)[]
+        if (_legendItems == null)
         {
-            (NodeKind.Primary,    "primary"),
-            (NodeKind.Internal,   "internal"),
-            (NodeKind.External,   "external"),
-            (NodeKind.Api,        "api"),
-            (NodeKind.Cdn,        "cdn"),
-            (NodeKind.Dependency, "dependency"),
-            (NodeKind.Tracker,    "tracker"),
-            (NodeKind.Suspicious, "suspicious"),
-        };
+            _legendItems = new (FormattedText, ImmutableSolidColorBrush)[LegendItems.Length];
+            for (int i = 0; i < LegendItems.Length; i++)
+            {
+                var (kind, label) = LegendItems[i];
+                int ki = (int)kind;
+                _legendItems[i] = (
+                    new FormattedText(label,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        FlowDirection.LeftToRight, MonoFont, 9,
+                        new ImmutableSolidColorBrush(Color.FromArgb(155,
+                            KindFills[ki].Color.R,
+                            KindFills[ki].Color.G,
+                            KindFills[ki].Color.B))),
+                    KindFills[ki]
+                );
+            }
+        }
 
-        double x  = bounds.Width - 140;
-        double y  = 14;
+        double x = bounds.Width - 140;
+        double y = 14;
 
-        foreach (var (kind, label) in items)
+        foreach (var (ft, dot) in _legendItems)
         {
-            var color = KindColor(kind);
-            ctx.DrawEllipse(
-                new SolidColorBrush(color), null,
-                new Point(x, y + 4), 4, 4);
-
-            var ft = new FormattedText(
-                label,
-                System.Globalization.CultureInfo.InvariantCulture,
-                FlowDirection.LeftToRight,
-                new Typeface("Courier New"), 9,
-                new SolidColorBrush(Color.FromArgb(155, color.R, color.G, color.B)));
-
+            ctx.DrawEllipse(dot, null, new Point(x, y + 4), 4, 4);
             ctx.DrawText(ft, new Point(x + 10, y));
             y += 16;
         }
