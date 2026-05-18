@@ -52,6 +52,13 @@ public class BrowserTab : ReactiveObject
         set => this.RaiseAndSetIfChanged(ref _graphNodes, value);
     }
 
+    /// <summary>
+    /// Arestas de navegação explícitas entre nós.
+    /// Substituiu a lógica Node.Next/Parent no render porque arestas
+    /// saindo de orbitais (não-primários) não eram visitadas pelo loop de primários.
+    /// </summary>
+    public List<NavigationEdge> GraphEdges { get; } = new();
+
     /// <summary>Histórico de URLs visitadas nesta aba.</summary>
     public ObservableCollection<string> History { get; } = new();
 }

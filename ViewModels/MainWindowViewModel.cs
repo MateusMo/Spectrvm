@@ -1,9 +1,9 @@
 using System;
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
 using ReactiveUI;
+using Spectrvm.Controls;
 using Spectrvm.Models;
 using Spectrvm.Services;
 
@@ -46,14 +46,12 @@ public class MainWindowViewModel : ViewModelBase
     {
         if (SelectedTab is not { } tab) return;
         if (string.IsNullOrWhiteSpace(tab.CurrentUrl)) return;
-
-        // Navegação pela barra de endereço: sem nó pai — cresce na cadeia principal
         await DoNavigate(tab, tab.CurrentUrl, parentNode: null);
     }
 
     /// <summary>
-    /// Chamado pelo clique num nó do grafo.
-    /// Recebe a URL e o próprio nó clicado para usá-lo como pai no grafo.
+    /// Chamado ao clicar num nó orbital.
+    /// O nó orbital é passado como parentNode → o service cria uma aresta orbital→primário.
     /// </summary>
     public async Task NavigateToUrl(string url, NavigationNode? fromNode = null)
     {
@@ -62,13 +60,55 @@ public class MainWindowViewModel : ViewModelBase
         await DoNavigate(tab, url, parentNode: fromNode);
     }
 
-    /// <summary>Alterna a ordenação dos links extraídos por Type.</summary>
+    /// <summary>
+    /// Expansão atômica: navega em paralelo para todos os orbitais do nó primário.
+    /// Race condition evitada: HTTP em paralelo, escrita sequencial na UI thread.
+    /// </summary>
+    public async Task AtomicExpandAsync(NavigationNode primaryNode, GraphCanvas canvas)
+    {
+        if (SelectedTab is not { } tab) return;
+
+        var orbits = primaryNode.OrbitNodes.ToList();
+        if (orbits.Count == 0) return;
+
+        // Todas as requisições HTTP em paralelo
+        var fetches = orbits.Select(async orbit =>
+        {
+            try
+            {
+                var result = await _browser.NavigateAsync(orbit.Url);
+                return (orbit, result, ok: true);
+            }
+            catch
+            {
+                return (orbit, result: (BrowserResult?)null, ok: false);
+            }
+        });
+
+        var results = await Task.WhenAll(fetches);
+
+        // Aplica resultados sequencialmente na UI thread — sem race condition
+        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            foreach (var (orbit, result, ok) in results)
+            {
+                if (!ok || result == null) continue;
+
+                tab.GraphNodes = _graph.AppendNavigation(
+                    tab.GraphNodes,
+                    tab.GraphEdges,
+                    orbit.Url,
+                    result.Links,
+                    parentNode: orbit);
+            }
+            canvas.InvalidateVisual();
+        });
+    }
+
     public void SortLinks()
     {
         if (SelectedTab?.Result is not { } result) return;
         var sorted = result.Links.OrderBy(l => l.Type).ThenBy(l => l.Url).ToList();
-        result.Links = sorted;
-        // Força notificação
         SelectedTab.Result = new BrowserResult
         {
             Html        = result.Html,
@@ -95,9 +135,12 @@ public class MainWindowViewModel : ViewModelBase
             if (tab.History.Count == 0 || tab.History[^1] != url)
                 tab.History.Add(url);
 
-            // Passa o nó pai para que as órbitas nasçam a partir dele
             tab.GraphNodes = _graph.AppendNavigation(
-                tab.GraphNodes, url, result.Links, parentNode);
+                tab.GraphNodes,
+                tab.GraphEdges,
+                url,
+                result.Links,
+                parentNode);
         }
         catch (Exception ex)
         {
