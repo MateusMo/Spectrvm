@@ -239,6 +239,7 @@ public class GraphCanvas : Control
     private bool            _isDraggingNode;
     private NavigationNode? _draggedNode;
     private double          _nodeXAtDragStart, _nodeYAtDragStart;
+    private bool            _pressedExpandBtn; // clique iniciou no botão ⊕
 
     // Offsets das órbitas relativo ao primário no início do drag
     private readonly List<(NavigationNode orbit, double dx, double dy)> _orbitDragOffsets = new();
@@ -266,21 +267,35 @@ public class GraphCanvas : Control
     {
         base.OnPointerPressed(e);
         Focus();
-        var pos   = e.GetPosition(this);
+        var pos = e.GetPosition(this);
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
 
         var world = ToWorld(pos);
-        var hit   = HitTest(world);
+
+        // Botão ⊕ tem prioridade máxima — verificar ANTES do hit-test do nó
+        // (o botão fica colado ao nó e os raios se sobrepõem)
+        var expandHit = HitTestExpandBtn(world);
+        if (expandHit != null)
+        {
+            _pressedExpandBtn = true;
+            _draggedNode = expandHit;
+            _dragStart = pos;
+            e.Handled = true;
+            return;
+        }
+
+        _pressedExpandBtn = false;
+        var hit = HitTest(world);
 
         if (hit != null)
         {
-            _isDraggingNode   = true;
-            _draggedNode      = hit;
-            _dragStart        = pos;
+            _isDraggingNode = true;
+            _draggedNode = hit;
+            _dragStart = pos;
             _nodeXAtDragStart = hit.X;
             _nodeYAtDragStart = hit.Y;
 
-            // MELHORIA 2: captura offsets das órbitas para arrastar junto
+            // captura offsets das órbitas para arrastar junto
             _orbitDragOffsets.Clear();
             if (hit.IsPrimary)
                 foreach (var orbit in hit.OrbitNodes)
@@ -288,11 +303,12 @@ public class GraphCanvas : Control
         }
         else
         {
-            _isDragging         = true;
-            _dragStart          = pos;
+            _isDragging = true;
+            _dragStart = pos;
             _offsetXAtDragStart = _offsetX;
             _offsetYAtDragStart = _offsetY;
         }
+
         e.Handled = true;
     }
 
@@ -350,24 +366,31 @@ public class GraphCanvas : Control
         var pos   = e.GetPosition(this);
         var world = ToWorld(pos);
 
+        if (_pressedExpandBtn && _draggedNode != null)
+        {
+            // Só dispara se o mouse não se afastou muito (é um clique, não um drag)
+            var dist = pos - _dragStart;
+            if (Math.Abs(dist.X) < 8 && Math.Abs(dist.Y) < 8)
+                OnAtomicExpand?.Invoke(_draggedNode);
+
+            _pressedExpandBtn = false;
+            _draggedNode      = null;
+            e.Handled = true;
+            return;
+        }
+
         if (_isDraggingNode && _draggedNode != null)
         {
             var dist    = pos - _dragStart;
             bool isClick = Math.Abs(dist.X) < 5 && Math.Abs(dist.Y) < 5;
-
             if (isClick)
-            {
-                // MELHORIA 3: clique no ⊕ tem prioridade
-                if (_draggedNode.IsPrimary && HitTestExpandBtn(world) != null)
-                    OnAtomicExpand?.Invoke(_draggedNode);
-                else
-                    OnNodeClicked?.Invoke(_draggedNode.Url, _draggedNode);
-            }
+                OnNodeClicked?.Invoke(_draggedNode.Url, _draggedNode);
         }
 
-        _isDragging     = false;
-        _isDraggingNode = false;
-        _draggedNode    = null;
+        _isDragging       = false;
+        _isDraggingNode   = false;
+        _pressedExpandBtn = false;
+        _draggedNode      = null;
         _orbitDragOffsets.Clear();
         e.Handled = true;
     }
