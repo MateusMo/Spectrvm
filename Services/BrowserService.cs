@@ -3,19 +3,19 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Spectrvm.Models;
 
 namespace Spectrvm.Services;
 
-public partial class BrowserService
+public class BrowserService
 {
-    private readonly HttpClient _http = new(new HttpClientHandler
+    private readonly HttpClient      _http      = new(new HttpClientHandler
     {
-        AllowAutoRedirect = true,
+        AllowAutoRedirect    = true,
         MaxAutomaticRedirections = 5
     });
+    private readonly SubdomainService _subdomains = new();
 
     // ── Domínios conhecidos por categoria ────────────────────────────────────
 
@@ -62,14 +62,34 @@ public partial class BrowserService
         var response = await _http.SendAsync(request);
         var html     = await response.Content.ReadAsStringAsync();
 
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            uri = new Uri("https://unknown.invalid");
+
+        var host = uri.Host;
+
+        // Extração completa de links (novo LinkExtractor)
+        var links = LinkExtractor.Extract(html, url, host);
+
+        // Security headers (síncrono, já temos o response)
+        var secHeaders = SecurityHeaderAnalyzer.Analyze(response);
+
+        // Fingerprint de tecnologias (síncrono)
+        var techs = TechFingerprinter.Detect(response, html);
+
+        // Subdomínios via crt.sh (assíncrono, não bloqueia o resto)
+        var subdomains = await _subdomains.FetchAsync(host);
+
         return new BrowserResult
         {
-            Html        = html,
-            CurlCommand = BuildCurl(url, request),
-            RequestInfo = BuildRequestInfo(response),
-            Links       = ExtractLinks(html, url),
-            StatusCode  = (int)response.StatusCode,
-            ContentType = response.Content.Headers.ContentType?.ToString() ?? ""
+            Html            = html,
+            CurlCommand     = BuildCurl(url, request),
+            RequestInfo     = BuildRequestInfo(response),
+            Links           = links,
+            SecurityHeaders = secHeaders,
+            Technologies    = techs,
+            Subdomains      = subdomains,
+            StatusCode      = (int)response.StatusCode,
+            ContentType     = response.Content.Headers.ContentType?.ToString() ?? ""
         };
     }
 
@@ -97,92 +117,34 @@ public partial class BrowserService
         return sb.ToString();
     }
 
-    // ── Extração de links ────────────────────────────────────────────────────
-
-    private static List<ExtractedLink> ExtractLinks(string html, string currentUrl)
-    {
-        if (!Uri.TryCreate(currentUrl, UriKind.Absolute, out var baseUri))
-            return new List<ExtractedLink>();
-
-        var host = baseUri.Host;
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var list = new List<ExtractedLink>();
-
-        foreach (Match m in LinkRegex().Matches(html))
-        {
-            var raw = m.Value.TrimEnd('"', '\'', ')', '>');
-            if (!seen.Add(raw)) continue;
-            if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri)) continue;
-
-            list.Add(new ExtractedLink
-            {
-                Url        = raw,
-                IsInternal = uri.Host.Equals(host, StringComparison.OrdinalIgnoreCase),
-                Type       = DetectType(raw),
-                Kind       = ClassifyKind(uri, host)
-            });
-        }
-
-        return list;
-    }
-
-    // ── Classificação ────────────────────────────────────────────────────────
-
-    private static string DetectType(string url) => url switch
-    {
-        _ when url.EndsWith(".js",  StringComparison.OrdinalIgnoreCase) => "js",
-        _ when url.EndsWith(".css", StringComparison.OrdinalIgnoreCase) => "css",
-        _ when url.EndsWith(".png", StringComparison.OrdinalIgnoreCase)
-            || url.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase)
-            || url.EndsWith(".svg", StringComparison.OrdinalIgnoreCase)
-            || url.EndsWith(".webp", StringComparison.OrdinalIgnoreCase)
-            || url.EndsWith(".gif", StringComparison.OrdinalIgnoreCase) => "asset",
-        _ when url.Contains("/api/", StringComparison.OrdinalIgnoreCase)
-            || url.Contains("graphql", StringComparison.OrdinalIgnoreCase)
-            || url.Contains("/rest/", StringComparison.OrdinalIgnoreCase) => "api",
-        _ => "page"
-    };
+    // ── Classificação (estática — usada por LinkExtractor também) ────────────
 
     public static NodeKind ClassifyKind(Uri uri, string originHost)
     {
         var host = uri.Host.ToLowerInvariant();
-
-        // Remove www. para comparação
         var bareHost   = host.StartsWith("www.") ? host[4..] : host;
         var bareOrigin = originHost.ToLowerInvariant();
         if (bareOrigin.StartsWith("www.")) bareOrigin = bareOrigin[4..];
 
-        // API
         if (uri.AbsolutePath.Contains("/api/", StringComparison.OrdinalIgnoreCase)
             || host.StartsWith("api.")
             || uri.AbsolutePath.Contains("graphql", StringComparison.OrdinalIgnoreCase)
-            || uri.AbsolutePath.Contains("/rest/",  StringComparison.OrdinalIgnoreCase))
+            || uri.AbsolutePath.Contains("/rest/", StringComparison.OrdinalIgnoreCase))
             return NodeKind.Api;
 
-        // Tracker
-        if (IsMatch(bareHost, KnownTrackers))
-            return NodeKind.Tracker;
+        if (IsMatch(bareHost, KnownTrackers))  return NodeKind.Tracker;
+        if (IsMatch(bareHost, KnownCdns))      return NodeKind.Cdn;
+        if (IsMatch(bareHost, SuspiciousPatterns)) return NodeKind.Suspicious;
 
-        // CDN
-        if (IsMatch(bareHost, KnownCdns))
-            return NodeKind.Cdn;
-
-        // Suspeito (shorteners, etc.)
-        if (IsMatch(bareHost, SuspiciousPatterns))
-            return NodeKind.Suspicious;
-
-        // Interno
         if (bareHost == bareOrigin || bareHost.EndsWith("." + bareOrigin))
             return NodeKind.Internal;
 
-        // Externo genérico
         return NodeKind.External;
     }
 
     private static bool IsMatch(string host, HashSet<string> set)
     {
         if (set.Contains(host)) return true;
-        // Verifica sufixos — ex: "cdn.cloudflare.com" → "cloudflare.com"
         var parts = host.Split('.');
         for (int i = 1; i < parts.Length - 1; i++)
         {
@@ -191,7 +153,4 @@ public partial class BrowserService
         }
         return false;
     }
-
-    [GeneratedRegex(@"https?://[^\s""'<>\)]+", RegexOptions.IgnoreCase)]
-    private static partial Regex LinkRegex();
 }

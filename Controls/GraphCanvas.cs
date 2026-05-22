@@ -29,29 +29,20 @@ public class GraphCanvas : Control
         }
     }
 
-    /// <summary>
-    /// Arestas de navegação explícitas (fornecidas pelo BrowserTab).
-    /// Precisa ser atualizado sempre que GraphNodes muda.
-    /// </summary>
     public List<NavigationEdge>? Edges { get; set; }
 
-    /// <summary>Clique em nó orbital → navega usando o nó como pai.</summary>
     public Action<string, NavigationNode>? OnNodeClicked { get; set; }
-
-    /// <summary>Clique no botão ⊕ de expansão atômica.</summary>
     public Action<NavigationNode>? OnAtomicExpand { get; set; }
 
     // ── Brushes / Pens ───────────────────────────────────────────────────────
 
-    private static readonly ImmutableSolidColorBrush BgBrush   = new(Color.FromRgb(11, 16, 32));
-    private static readonly ImmutableSolidColorBrush GridBrush  = new(Color.FromArgb(18, 255, 255, 255));
+    private static readonly ImmutableSolidColorBrush BgBrush  = new(Color.FromRgb(11, 16, 32));
+    private static readonly ImmutableSolidColorBrush GridBrush = new(Color.FromArgb(18, 255, 255, 255));
 
-    // Cadeia por digitação de URL (primário → primário)
     private static readonly Pen ChainEdgePen = new(
         new ImmutableSolidColorBrush(Color.FromArgb(210, 59, 130, 246)), 2.0)
         { DashStyle = DashStyle.Dash };
 
-    // Clique em sublink (orbital → novo primário) — branco sólido
     private static readonly Pen SubLinkEdgePen = new(
         new ImmutableSolidColorBrush(Color.FromArgb(220, 255, 255, 255)), 2.0);
 
@@ -65,6 +56,7 @@ public class GraphCanvas : Control
         new(Color.FromRgb(6,   182, 212)),  // Cdn
         new(Color.FromRgb(234, 179, 8)),    // Api
         new(Color.FromRgb(168, 85,  247)),  // Suspicious
+        new(Color.FromRgb(20,  184, 166)),  // Subdomain  ← novo
     ];
 
     private static readonly ImmutableSolidColorBrush[] OrbitEdgeBrushes =
@@ -77,6 +69,7 @@ public class GraphCanvas : Control
         new(Color.FromArgb(80, 6,   182, 212)),
         new(Color.FromArgb(80, 234, 179, 8)),
         new(Color.FromArgb(80, 168, 85,  247)),
+        new(Color.FromArgb(80, 20,  184, 166)), // Subdomain
     ];
 
     private static readonly Pen[] OrbitEdgePensSolid;
@@ -92,6 +85,7 @@ public class GraphCanvas : Control
         new(Color.FromArgb(20, 6,   182, 212)),
         new(Color.FromArgb(20, 234, 179, 8)),
         new(Color.FromArgb(20, 168, 85,  247)),
+        new(Color.FromArgb(20, 20,  184, 166)), // Subdomain
     ];
 
     private static readonly ImmutableSolidColorBrush[] LabelBrushes =
@@ -104,8 +98,10 @@ public class GraphCanvas : Control
         new(Color.FromArgb(215, 6,   182, 212)),
         new(Color.FromArgb(215, 234, 179, 8)),
         new(Color.FromArgb(215, 168, 85,  247)),
+        new(Color.FromArgb(215, 20,  184, 166)), // Subdomain
     ];
 
+    // Legenda agora inclui subdomain e ficará no canto INFERIOR ESQUERDO
     private static readonly (NodeKind kind, string label)[] LegendItems =
     [
         (NodeKind.Primary,    "primary"),
@@ -116,13 +112,13 @@ public class GraphCanvas : Control
         (NodeKind.Dependency, "dependency"),
         (NodeKind.Tracker,    "tracker"),
         (NodeKind.Suspicious, "suspicious"),
+        (NodeKind.Subdomain,  "subdomain"),
     ];
 
-    private static readonly ImmutableSolidColorBrush LabelBg    = new(Color.FromArgb(175, 11, 16, 32));
-    private static readonly ImmutableSolidColorBrush HintBrush  = new(Color.FromArgb(60,  200, 220, 255));
-    private static readonly ImmutableSolidColorBrush HudBrush   = new(Color.FromArgb(45,  200, 220, 255));
+    private static readonly ImmutableSolidColorBrush LabelBg   = new(Color.FromArgb(175, 11, 16, 32));
+    private static readonly ImmutableSolidColorBrush HintBrush = new(Color.FromArgb(60,  200, 220, 255));
+    private static readonly ImmutableSolidColorBrush HudBrush  = new(Color.FromArgb(45,  200, 220, 255));
 
-    // Botão ⊕
     private static readonly ImmutableSolidColorBrush ExpandFill  = new(Color.FromArgb(200, 20,  60,  120));
     private static readonly ImmutableSolidColorBrush ExpandHover = new(Color.FromArgb(240, 30,  100, 200));
     private static readonly ImmutableSolidColorBrush ExpandText  = new(Color.FromArgb(230, 100, 200, 255));
@@ -152,24 +148,23 @@ public class GraphCanvas : Control
     {
         var key = (node.Url, node.IsPrimary);
         if (_labelCache.TryGetValue(key, out var cached)) return cached;
+        var kindIdx = Math.Min((int)node.Kind, LabelBrushes.Length - 1);
         var ft = new FormattedText(
             ShortenUrl(node.Url),
             System.Globalization.CultureInfo.InvariantCulture,
             FlowDirection.LeftToRight, MonoFont,
             node.IsPrimary ? 11.0 : 8.0,
-            LabelBrushes[(int)node.Kind]);
+            LabelBrushes[kindIdx]);
         _labelCache[key] = ft;
         return ft;
     }
 
-    // ── Expansão atômica — estado visual ────────────────────────────────────
+    // ── Expansão atômica ─────────────────────────────────────────────────────
 
     private readonly HashSet<Guid> _expandingNodes = new();
 
     public void MarkExpanding(NavigationNode node)   { _expandingNodes.Add(node.Id);    InvalidateVisual(); }
     public void UnmarkExpanding(NavigationNode node) { _expandingNodes.Remove(node.Id); InvalidateVisual(); }
-
-    // ── Hover ────────────────────────────────────────────────────────────────
 
     private NavigationNode? _hoveredExpandBtn;
 
@@ -239,9 +234,8 @@ public class GraphCanvas : Control
     private bool            _isDraggingNode;
     private NavigationNode? _draggedNode;
     private double          _nodeXAtDragStart, _nodeYAtDragStart;
-    private bool            _pressedExpandBtn; // clique iniciou no botão ⊕
+    private bool            _pressedExpandBtn;
 
-    // Offsets das órbitas relativo ao primário no início do drag
     private readonly List<(NavigationNode orbit, double dx, double dy)> _orbitDragOffsets = new();
 
     private Point ToWorld(Point screen) => new(
@@ -272,8 +266,6 @@ public class GraphCanvas : Control
 
         var world = ToWorld(pos);
 
-        // Botão ⊕ tem prioridade máxima — verificar ANTES do hit-test do nó
-        // (o botão fica colado ao nó e os raios se sobrepõem)
         var expandHit = HitTestExpandBtn(world);
         if (expandHit != null)
         {
@@ -294,8 +286,6 @@ public class GraphCanvas : Control
             _dragStart = pos;
             _nodeXAtDragStart = hit.X;
             _nodeYAtDragStart = hit.Y;
-
-            // captura offsets das órbitas para arrastar junto
             _orbitDragOffsets.Clear();
             if (hit.IsPrimary)
                 foreach (var orbit in hit.OrbitNodes)
@@ -319,13 +309,11 @@ public class GraphCanvas : Control
 
         if (_isDraggingNode && _draggedNode != null)
         {
-            var delta  = pos - _dragStart;
+            var delta = pos - _dragStart;
             double newX = _nodeXAtDragStart + delta.X / _scale;
             double newY = _nodeYAtDragStart + delta.Y / _scale;
             _draggedNode.X = newX;
             _draggedNode.Y = newY;
-
-            // MELHORIA 2: move órbitas junto
             if (_draggedNode.IsPrimary)
                 foreach (var (orbit, dx, dy) in _orbitDragOffsets)
                 {
@@ -333,7 +321,6 @@ public class GraphCanvas : Control
                     orbit.Y = newY + dy;
                     orbit.OrbitParentY = newY;
                 }
-
             InvalidateVisual();
             e.Handled = true;
             return;
@@ -342,14 +329,13 @@ public class GraphCanvas : Control
         if (_isDragging)
         {
             var delta = pos - _dragStart;
-            _offsetX  = _offsetXAtDragStart + delta.X;
-            _offsetY  = _offsetYAtDragStart + delta.Y;
+            _offsetX = _offsetXAtDragStart + delta.X;
+            _offsetY = _offsetYAtDragStart + delta.Y;
             InvalidateVisual();
             e.Handled = true;
             return;
         }
 
-        // Hover no botão ⊕
         var world     = ToWorld(pos);
         var prevHover = _hoveredExpandBtn;
         _hoveredExpandBtn = HitTestExpandBtn(world);
@@ -363,16 +349,13 @@ public class GraphCanvas : Control
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
-        var pos   = e.GetPosition(this);
-        var world = ToWorld(pos);
+        var pos = e.GetPosition(this);
 
         if (_pressedExpandBtn && _draggedNode != null)
         {
-            // Só dispara se o mouse não se afastou muito (é um clique, não um drag)
             var dist = pos - _dragStart;
             if (Math.Abs(dist.X) < 8 && Math.Abs(dist.Y) < 8)
                 OnAtomicExpand?.Invoke(_draggedNode);
-
             _pressedExpandBtn = false;
             _draggedNode      = null;
             e.Handled = true;
@@ -381,9 +364,8 @@ public class GraphCanvas : Control
 
         if (_isDraggingNode && _draggedNode != null)
         {
-            var dist    = pos - _dragStart;
-            bool isClick = Math.Abs(dist.X) < 5 && Math.Abs(dist.Y) < 5;
-            if (isClick)
+            var dist = pos - _dragStart;
+            if (Math.Abs(dist.X) < 5 && Math.Abs(dist.Y) < 5)
                 OnNodeClicked?.Invoke(_draggedNode.Url, _draggedNode);
         }
 
@@ -437,7 +419,7 @@ public class GraphCanvas : Control
         return null;
     }
 
-    // ── View controls ─────────────────────────────────────────────────────────
+    // ── View controls ────────────────────────────────────────────────────────
 
     private void ResetView() { _scale = 1.0; _offsetX = 0; _offsetY = 0; InvalidateVisual(); }
 
@@ -463,9 +445,14 @@ public class GraphCanvas : Control
 
     // ── Helpers visuais ───────────────────────────────────────────────────────
 
-    private static double VisualRadius(NavigationNode n) => n.IsPrimary ? 11.0 : 6.0;
+    private static double VisualRadius(NavigationNode n) =>
+        n.Kind == NodeKind.Subdomain ? 7.0 : n.IsPrimary ? 11.0 : 6.0;
+
     private static bool IsFastPulse(NodeKind k) => k == NodeKind.Tracker || k == NodeKind.Suspicious;
-    private static bool HasDashedEdge(NodeKind k) => k == NodeKind.Dependency || k == NodeKind.Tracker || k == NodeKind.Suspicious;
+    private static bool HasDashedEdge(NodeKind k) => k == NodeKind.Dependency || k == NodeKind.Tracker
+                                                   || k == NodeKind.Suspicious || k == NodeKind.Subdomain;
+
+    private static int KindIndex(NodeKind k) => Math.Min((int)k, KindFills.Length - 1);
 
     // ── Render ───────────────────────────────────────────────────────────────
 
@@ -482,21 +469,19 @@ public class GraphCanvas : Control
         var transform = Matrix.CreateScale(_scale, _scale) * Matrix.CreateTranslation(_offsetX, _offsetY);
         using (ctx.PushTransform(transform))
         {
-            // 1. Arestas órbita (primário → seus orbitais)
+            // 1. Arestas órbita
             foreach (var node in nodes)
             {
                 if (!node.IsPrimary) continue;
                 foreach (var orbit in node.OrbitNodes)
                 {
-                    int ki  = (int)orbit.Kind;
+                    int ki  = KindIndex(orbit.Kind);
                     var pen = HasDashedEdge(orbit.Kind) ? OrbitEdgePensDash[ki] : OrbitEdgePensSolid[ki];
                     ctx.DrawLine(pen, new Point(node.X, node.Y), new Point(orbit.X, orbit.Y));
                 }
             }
 
-            // 2. Arestas de navegação — lidas da lista explícita de arestas
-            //    MELHORIA 1: funciona para origem orbital E primária porque a aresta
-            //    é registrada pelo service no momento da navegação, independente do tipo.
+            // 2. Arestas de navegação explícitas
             var edges = Edges;
             if (edges != null)
             {
@@ -504,9 +489,8 @@ public class GraphCanvas : Control
                 {
                     var from = new Point(edge.Source.X, edge.Source.Y);
                     var to   = new Point(edge.Target.X, edge.Target.Y);
-                    var pen  = ChainEdgePen; // mesmo estilo para todos os tipos de aresta
-                    ctx.DrawLine(pen, from, to);
-                    DrawArrow(ctx, pen.Brush!, from, to);
+                    ctx.DrawLine(ChainEdgePen, from, to);
+                    DrawArrow(ctx, ChainEdgePen.Brush!, from, to);
                 }
             }
 
@@ -516,10 +500,10 @@ public class GraphCanvas : Control
 
             foreach (var node in nodes)
             {
-                int    ki = (int)node.Kind;
+                int    ki = KindIndex(node.Kind);
                 double r  = VisualRadius(node);
                 double pt = IsFastPulse(node.Kind) ? fastPulse : pulse;
-                double hr = r + (node.IsPrimary ? 10 : 6) + pt * (node.IsPrimary ? 7 : 3);
+                double hr = r + (node.IsPrimary ? 10 : 5) + pt * (node.IsPrimary ? 7 : 3);
 
                 ctx.DrawEllipse(HaloBrushes[ki], null, new Point(node.X, node.Y), hr, hr);
                 ctx.DrawEllipse(KindFills[ki],   null, new Point(node.X, node.Y), r,  r);
@@ -530,6 +514,7 @@ public class GraphCanvas : Control
             }
         }
 
+        // Legenda agora no canto INFERIOR ESQUERDO (longe do InfoPanel)
         DrawLegend(ctx, bounds);
         DrawHud(ctx, bounds);
     }
@@ -587,7 +572,7 @@ public class GraphCanvas : Control
         ctx.DrawText(ft, new Point(lx, ly));
     }
 
-    // ── Grid / HUD / Hint / Legend ────────────────────────────────────────────
+    // ── Grid / HUD / Hint ────────────────────────────────────────────────────
 
     private void DrawGrid(DrawingContext ctx, Rect bounds)
     {
@@ -617,6 +602,8 @@ public class GraphCanvas : Control
         ctx.DrawText(_hudFt, new Point(12, bounds.Height - _hudFt.Height - 8));
     }
 
+    // ── Legenda — CANTO INFERIOR ESQUERDO ────────────────────────────────────
+
     private (FormattedText ft, ImmutableSolidColorBrush dot)[]? _legendItems;
 
     private void DrawLegend(DrawingContext ctx, Rect bounds)
@@ -627,7 +614,7 @@ public class GraphCanvas : Control
             for (int i = 0; i < LegendItems.Length; i++)
             {
                 var (kind, label) = LegendItems[i];
-                int ki = (int)kind;
+                int ki = KindIndex(kind);
                 _legendItems[i] = (
                     new FormattedText(label,
                         System.Globalization.CultureInfo.InvariantCulture,
@@ -637,12 +624,19 @@ public class GraphCanvas : Control
                     KindFills[ki]);
             }
         }
-        double x = bounds.Width - 140, y = 14;
+
+        // Posição: inferior esquerdo, acima do HUD
+        double hudH  = 18;
+        double itemH = 16;
+        double totalH = LegendItems.Length * itemH;
+        double x = 14;
+        double y = bounds.Height - hudH - totalH - 8;
+
         foreach (var (ft, dot) in _legendItems)
         {
-            ctx.DrawEllipse(dot, null, new Point(x, y + 4), 4, 4);
+            ctx.DrawEllipse(dot, null, new Point(x, y + 5), 4, 4);
             ctx.DrawText(ft, new Point(x + 10, y));
-            y += 16;
+            y += itemH;
         }
     }
 

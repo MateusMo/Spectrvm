@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Spectrvm.Models;
 
 namespace Spectrvm.Services;
@@ -14,14 +15,14 @@ public class NavigationGraphService
     // ── API pública ──────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Adiciona um novo nó primário e suas órbitas ao grafo.
-    /// Também registra a aresta de navegação em <paramref name="edges"/>.
+    /// Adiciona um novo nó primário, suas órbitas de links e seus subdomínios ao grafo.
     /// </summary>
     public List<NavigationNode> AppendNavigation(
         List<NavigationNode> existing,
         List<NavigationEdge> edges,
         string               url,
         List<ExtractedLink>  links,
+        List<string>         subdomains,
         NavigationNode?      parentNode = null)
     {
         double maxOrbitRadius = ComputeMaxOrbitRadius(links.Count);
@@ -38,34 +39,39 @@ public class NavigationGraphService
         };
 
         // ── Aresta de navegação ──────────────────────────────────────────────
-        // Sempre criamos uma aresta explícita de onde viemos → novo primário.
-        // Se parentNode é orbital → aresta orbital→primário (linha de clique de sublink).
-        // Se parentNode é primário → aresta primário→primário (cadeia de digitação).
-        // Se parentNode é null → procura o último primário da cadeia.
         if (parentNode != null)
         {
             edges.Add(new NavigationEdge
             {
-                Source    = parentNode,
-                Target    = primary,
-                ViaOrbit  = !parentNode.IsPrimary
+                Source   = parentNode,
+                Target   = primary,
+                ViaOrbit = !parentNode.IsPrimary
             });
         }
         else
         {
             var chain = CollectPrimaryChain(existing);
             if (chain.Count > 0)
-            {
-                edges.Add(new NavigationEdge
-                {
-                    Source   = chain[^1],
-                    Target   = primary,
-                    ViaOrbit = false
-                });
-            }
+                edges.Add(new NavigationEdge { Source = chain[^1], Target = primary, ViaOrbit = false });
         }
 
+        // ── Órbitas de links ────────────────────────────────────────────────
         BuildOrbits(primary, links, parentNode);
+
+        // ── Órbitas de subdomínios ───────────────────────────────────────────
+        // Deduplica: remove subdomínios que já existem como nó primário no grafo
+        var existingUrls = new HashSet<string>(
+            existing.Where(n => n.IsPrimary).Select(n =>
+            {
+                if (Uri.TryCreate(n.Url, UriKind.Absolute, out var u)) return u.Host.ToLowerInvariant();
+                return n.Url.ToLowerInvariant();
+            }),
+            StringComparer.OrdinalIgnoreCase);
+
+        // Também deduplica entre si (crt.sh pode retornar variações)
+        var seenSubs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        BuildSubdomainOrbits(primary, subdomains, existingUrls, seenSubs);
 
         var all = new List<NavigationNode>(existing) { primary };
         all.AddRange(primary.OrbitNodes);
@@ -149,7 +155,7 @@ public class NavigationGraphService
         return max + 32;
     }
 
-    // ── Órbitas ───────────────────────────────────────────────────────────────
+    // ── Órbitas de links ─────────────────────────────────────────────────────
 
     private static void BuildOrbits(
         NavigationNode      primary,
@@ -194,6 +200,67 @@ public class NavigationGraphService
                 });
             }
         }
+    }
+
+    // ── Órbitas de subdomínios ───────────────────────────────────────────────
+
+    private static void BuildSubdomainOrbits(
+        NavigationNode     primary,
+        List<string>       subdomains,
+        HashSet<string>    existingHosts,
+        HashSet<string>    seen)
+    {
+        if (subdomains.Count == 0) return;
+
+        // Filtra duplicatas e hosts já no grafo
+        var filtered = subdomains
+            .Where(s => seen.Add(s) && !existingHosts.Contains(s))
+            .ToList();
+
+        if (filtered.Count == 0) return;
+
+        // Anel dedicado para subdomínios — fica ACIMA do nó primário (ângulo de topo)
+        // Usa uma camada extra acima das órbitas de links
+        int    existingLayers = CountOrbitLayers(primary);
+        double radius = BaseOrbitRadius * (existingLayers + 1);
+
+        // Subdomínios em arco no hemisfério superior (0° a 180° = topo)
+        double openArc   = 160.0 * Math.PI / 180.0;
+        double centerDir = -Math.PI / 2; // aponta para cima
+        int    count     = filtered.Count;
+        double startAngle = centerDir - openArc / 2.0;
+        double step       = count > 1 ? openArc / (count - 1) : 0;
+
+        for (int i = 0; i < count; i++)
+        {
+            double angle = count == 1 ? centerDir : startAngle + i * step;
+            double ox = primary.X + radius * Math.Cos(angle);
+            double oy = primary.Y + radius * Math.Sin(angle);
+
+            primary.OrbitNodes.Add(new NavigationNode
+            {
+                Url          = "https://" + filtered[i],
+                X            = ox,
+                Y            = oy,
+                IsPrimary    = false,
+                Kind         = NodeKind.Subdomain,
+                OrbitParentY = primary.Y,
+                Parent       = primary
+            });
+        }
+    }
+
+    private static int CountOrbitLayers(NavigationNode primary)
+    {
+        if (primary.OrbitNodes.Count == 0) return 0;
+        double maxDist = 0;
+        foreach (var o in primary.OrbitNodes)
+        {
+            double dx = o.X - primary.X, dy = o.Y - primary.Y;
+            double d = Math.Sqrt(dx * dx + dy * dy);
+            if (d > maxDist) maxDist = d;
+        }
+        return Math.Max(1, (int)Math.Round(maxDist / BaseOrbitRadius));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

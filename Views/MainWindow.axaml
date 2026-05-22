@@ -26,13 +26,13 @@
             <Setter Property="CaretBrush"      Value="#4fc3f7"/>
         </Style>
         <Style Selector="ComboBox.mode">
-            <Setter Property="Background"  Value="#111620"/>
-            <Setter Property="Foreground"  Value="#4fc3f7"/>
-            <Setter Property="BorderBrush" Value="#1e2a3a"/>
+            <Setter Property="Background"   Value="#111620"/>
+            <Setter Property="Foreground"   Value="#4fc3f7"/>
+            <Setter Property="BorderBrush"  Value="#1e2a3a"/>
             <Setter Property="CornerRadius" Value="6"/>
-            <Setter Property="FontFamily"  Value="Courier New"/>
-            <Setter Property="FontSize"    Value="12"/>
-            <Setter Property="MinWidth"    Value="140"/>
+            <Setter Property="FontFamily"   Value="Courier New"/>
+            <Setter Property="FontSize"     Value="12"/>
+            <Setter Property="MinWidth"     Value="140"/>
         </Style>
         <Style Selector="Button.go">
             <Setter Property="Background"   Value="#1565c0"/>
@@ -133,7 +133,7 @@
             </Grid>
         </Border>
 
-        <!-- LOADING -->
+        <!-- LOADING BAR -->
         <ProgressBar Grid.Row="1"
                      IsIndeterminate="True"
                      IsVisible="{Binding SelectedTab.IsLoading}"
@@ -205,22 +205,16 @@
                                       IsVisible="{Binding ViewMode, Converter={x:Static conv:ViewModeConverters.Links}}">
                             <Border Background="#0d1318" CornerRadius="8" Padding="14">
                                 <StackPanel Spacing="6">
-                                    <!-- Header com botão sort -->
                                     <Grid ColumnDefinitions="*,Auto">
                                         <TextBlock Classes="seclabel" Text="EXTRACTED LINKS" VerticalAlignment="Center"/>
-                                        <Button Grid.Column="1"
-                                                Classes="sort"
-                                                Content="↕ TYPE"
-                                                Click="OnSortLinks"/>
+                                        <Button Grid.Column="1" Classes="sort" Content="↕ TYPE" Click="OnSortLinks"/>
                                     </Grid>
                                     <ItemsControl ItemsSource="{Binding Result.Links}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="models:ExtractedLink">
                                                 <Grid ColumnDefinitions="52,*" Margin="0,2">
-                                                    <Border Background="#0a1520"
-                                                            CornerRadius="3"
-                                                            Padding="4,2"
-                                                            HorizontalAlignment="Left">
+                                                    <Border Background="#0a1520" CornerRadius="3"
+                                                            Padding="4,2" HorizontalAlignment="Left">
                                                         <TextBlock Text="{Binding Type}"
                                                                    FontFamily="Courier New"
                                                                    FontSize="9"
@@ -257,12 +251,25 @@
                             </Border>
                         </ScrollViewer>
 
-                        <!-- NAVIGATOR -->
-                        <Border Background="#060a0f"
-                                IsVisible="{Binding ViewMode, Converter={x:Static conv:ViewModeConverters.Navigator}}">
-                            <controls:GraphCanvas x:Name="TheGraph"
-                                                  Nodes="{Binding GraphNodes}"/>
-                        </Border>
+                        <!-- NAVIGATOR: GraphCanvas + InfoPanel sobrepostos -->
+                        <Grid IsVisible="{Binding ViewMode, Converter={x:Static conv:ViewModeConverters.Navigator}}">
+
+                            <!-- Grafo ocupa todo o espaço — recebe mouse normalmente -->
+                            <Border Background="#060a0f">
+                                <controls:GraphCanvas x:Name="TheGraph"
+                                                      Nodes="{Binding GraphNodes}"/>
+                            </Border>
+
+                            <!-- InfoPanel flutua no canto superior direito.
+                                 IsHitTestVisible=True (padrão) para receber
+                                 eventos de resize e scroll do próprio painel.
+                                 Eventos FORA do painel passam ao GraphCanvas
+                                 porque o InfoPanel só consume eventos dentro
+                                 de sua área visual (IsInsidePanel). -->
+                            <controls:InfoPanel Result="{Binding Result}"
+                                                HorizontalAlignment="Stretch"
+                                                VerticalAlignment="Stretch"/>
+                        </Grid>
 
                     </Grid>
                 </DataTemplate>

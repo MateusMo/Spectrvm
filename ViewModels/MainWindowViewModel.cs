@@ -51,7 +51,7 @@ public class MainWindowViewModel : ViewModelBase
 
     /// <summary>
     /// Chamado ao clicar num nó orbital.
-    /// O nó orbital é passado como parentNode → o service cria uma aresta orbital→primário.
+    /// Sempre atualiza tab.Result para o InfoPanel refletir o novo site.
     /// </summary>
     public async Task NavigateToUrl(string url, NavigationNode? fromNode = null)
     {
@@ -62,16 +62,17 @@ public class MainWindowViewModel : ViewModelBase
 
     /// <summary>
     /// Expansão atômica: navega em paralelo para todos os orbitais do nó primário.
-    /// Race condition evitada: HTTP em paralelo, escrita sequencial na UI thread.
+    /// Atualiza tab.Result com o resultado do último orbital que completou com sucesso.
     /// </summary>
     public async Task AtomicExpandAsync(NavigationNode primaryNode, GraphCanvas canvas)
     {
         if (SelectedTab is not { } tab) return;
 
-        var orbits = primaryNode.OrbitNodes.ToList();
+        var orbits = primaryNode.OrbitNodes
+            .Where(o => o.Kind != NodeKind.Subdomain) // subdomínios não expandem automaticamente
+            .ToList();
         if (orbits.Count == 0) return;
 
-        // Todas as requisições HTTP em paralelo
         var fetches = orbits.Select(async orbit =>
         {
             try
@@ -87,20 +88,28 @@ public class MainWindowViewModel : ViewModelBase
 
         var results = await Task.WhenAll(fetches);
 
-        // Aplica resultados sequencialmente na UI thread — sem race condition
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
         {
+            BrowserResult? lastResult = null;
+
             foreach (var (orbit, result, ok) in results)
             {
                 if (!ok || result == null) continue;
+                lastResult = result;
 
                 tab.GraphNodes = _graph.AppendNavigation(
                     tab.GraphNodes,
                     tab.GraphEdges,
                     orbit.Url,
                     result.Links,
+                    result.Subdomains,
                     parentNode: orbit);
             }
+
+            // Atualiza InfoPanel com o resultado do último orbital expandido
+            if (lastResult != null)
+                tab.Result = lastResult;
+
             canvas.InvalidateVisual();
         });
     }
@@ -111,15 +120,20 @@ public class MainWindowViewModel : ViewModelBase
         var sorted = result.Links.OrderBy(l => l.Type).ThenBy(l => l.Url).ToList();
         SelectedTab.Result = new BrowserResult
         {
-            Html        = result.Html,
-            CurlCommand = result.CurlCommand,
-            RequestInfo = result.RequestInfo,
-            Links       = sorted,
-            StatusCode  = result.StatusCode,
-            ContentType = result.ContentType,
-            Timestamp   = result.Timestamp
+            Html            = result.Html,
+            CurlCommand     = result.CurlCommand,
+            RequestInfo     = result.RequestInfo,
+            Links           = sorted,
+            Subdomains      = result.Subdomains,
+            SecurityHeaders = result.SecurityHeaders,
+            Technologies    = result.Technologies,
+            StatusCode      = result.StatusCode,
+            ContentType     = result.ContentType,
+            Timestamp       = result.Timestamp
         };
     }
+
+    // ── Navegação central ─────────────────────────────────────────────────────
 
     private async Task DoNavigate(BrowserTab tab, string url, NavigationNode? parentNode)
     {
@@ -127,6 +141,8 @@ public class MainWindowViewModel : ViewModelBase
         try
         {
             var result = await _browser.NavigateAsync(url);
+
+            // Sempre atualiza Result — isso aciona o binding do InfoPanel
             tab.Result = result;
 
             if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
@@ -140,6 +156,7 @@ public class MainWindowViewModel : ViewModelBase
                 tab.GraphEdges,
                 url,
                 result.Links,
+                result.Subdomains,
                 parentNode);
         }
         catch (Exception ex)
