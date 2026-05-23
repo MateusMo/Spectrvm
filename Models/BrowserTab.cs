@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using ReactiveUI;
 using Spectrvm.Models;
+using WebViewControl;
 
 namespace Spectrvm.Models;
 
@@ -10,6 +11,11 @@ public class BrowserTab : ReactiveObject
 {
     public Guid Id { get; } = Guid.NewGuid();
 
+    // ── WebView dedicado a esta aba ───────────────────────────────────────────
+    // Cada aba tem sua própria instância de WebView para isolamento total.
+    public WebView? WebViewInstance { get; set; }
+
+    // ── URL atual ─────────────────────────────────────────────────────────────
     private string _currentUrl = "https://";
     public string CurrentUrl
     {
@@ -17,6 +23,7 @@ public class BrowserTab : ReactiveObject
         set => this.RaiseAndSetIfChanged(ref _currentUrl, value);
     }
 
+    // ── Título ────────────────────────────────────────────────────────────────
     private string _title = "New Tab";
     public string Title
     {
@@ -24,6 +31,7 @@ public class BrowserTab : ReactiveObject
         set => this.RaiseAndSetIfChanged(ref _title, value);
     }
 
+    // ── Resultado da análise HTTP ─────────────────────────────────────────────
     private BrowserResult _result = new();
     public BrowserResult Result
     {
@@ -31,6 +39,7 @@ public class BrowserTab : ReactiveObject
         set => this.RaiseAndSetIfChanged(ref _result, value);
     }
 
+    // ── Modo de visualização ──────────────────────────────────────────────────
     private ViewMode _viewMode = ViewMode.Interpreter;
     public ViewMode ViewMode
     {
@@ -38,6 +47,7 @@ public class BrowserTab : ReactiveObject
         set => this.RaiseAndSetIfChanged(ref _viewMode, value);
     }
 
+    // ── Loading / Analyzing ───────────────────────────────────────────────────
     private bool _isLoading;
     public bool IsLoading
     {
@@ -45,6 +55,22 @@ public class BrowserTab : ReactiveObject
         set => this.RaiseAndSetIfChanged(ref _isLoading, value);
     }
 
+    private bool _isAnalyzing;
+    public bool IsAnalyzing
+    {
+        get => _isAnalyzing;
+        set => this.RaiseAndSetIfChanged(ref _isAnalyzing, value);
+    }
+
+    // ── Toggle HTML cru / renderizado (Interpreter) ───────────────────────────
+    private bool _showRawHtml;
+    public bool ShowRawHtml
+    {
+        get => _showRawHtml;
+        set => this.RaiseAndSetIfChanged(ref _showRawHtml, value);
+    }
+
+    // ── Grafo ────────────────────────────────────────────────────────────────
     private List<NavigationNode> _graphNodes = new();
     public List<NavigationNode> GraphNodes
     {
@@ -52,13 +78,18 @@ public class BrowserTab : ReactiveObject
         set => this.RaiseAndSetIfChanged(ref _graphNodes, value);
     }
 
-    /// <summary>
-    /// Arestas de navegação explícitas entre nós.
-    /// Substituiu a lógica Node.Next/Parent no render porque arestas
-    /// saindo de orbitais (não-primários) não eram visitadas pelo loop de primários.
-    /// </summary>
-    public List<NavigationEdge> GraphEdges { get; } = new();
+    public List<NavigationEdge>         GraphEdges { get; } = new();
+    public ObservableCollection<string> History    { get; } = new();
 
-    /// <summary>Histórico de URLs visitadas nesta aba.</summary>
-    public ObservableCollection<string> History { get; } = new();
+    // ── Pilha de navegação interna (Voltar) ───────────────────────────────────
+    // Guardamos URLs confirmadas para poder voltar.
+    public Stack<string> BackStack { get; } = new();
+
+    // ── Pode voltar? ──────────────────────────────────────────────────────────
+    private bool _canGoBack;
+    public bool CanGoBack
+    {
+        get => _canGoBack;
+        set => this.RaiseAndSetIfChanged(ref _canGoBack, value);
+    }
 }

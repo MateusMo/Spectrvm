@@ -4,8 +4,10 @@
         xmlns:models="using:Spectrvm.Models"
         xmlns:conv="using:Spectrvm.Converters"
         xmlns:controls="using:Spectrvm.Controls"
+        xmlns:wv="using:WebViewControl"
         x:Class="Spectrvm.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
+        Icon="/Assets/icon.png"
         Title="SPECTRVM 👻"
         Width="1400" Height="900" MinWidth="900" MinHeight="600"
         Background="#080b10">
@@ -45,6 +47,24 @@
         <Style Selector="Button.go:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="#1976d2"/>
         </Style>
+        <Style Selector="Button.navbtn">
+            <Setter Property="Background"      Value="#0d1520"/>
+            <Setter Property="Foreground"      Value="#4fc3f7"/>
+            <Setter Property="BorderBrush"     Value="#1e2a3a"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius"    Value="6"/>
+            <Setter Property="Padding"         Value="10,6"/>
+            <Setter Property="FontFamily"      Value="Courier New"/>
+            <Setter Property="FontSize"        Value="14"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+            <Setter Property="MinWidth"        Value="36"/>
+        </Style>
+        <Style Selector="Button.navbtn:pointerover /template/ ContentPresenter">
+            <Setter Property="Foreground" Value="#81d4fa"/>
+        </Style>
+        <Style Selector="Button.navbtn:disabled /template/ ContentPresenter">
+            <Setter Property="Foreground" Value="#2a3a4a"/>
+        </Style>
         <Style Selector="Button.addtab">
             <Setter Property="Background"      Value="#131b26"/>
             <Setter Property="Foreground"      Value="#4fc3f7"/>
@@ -66,6 +86,20 @@
             <Setter Property="Cursor"          Value="Hand"/>
         </Style>
         <Style Selector="Button.sort:pointerover /template/ ContentPresenter">
+            <Setter Property="Foreground" Value="#4fc3f7"/>
+        </Style>
+        <Style Selector="Button.rawbtn">
+            <Setter Property="Background"      Value="#0d1a28"/>
+            <Setter Property="Foreground"      Value="#546e7a"/>
+            <Setter Property="BorderBrush"     Value="#1e2a3a"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius"    Value="4"/>
+            <Setter Property="Padding"         Value="8,3"/>
+            <Setter Property="FontFamily"      Value="Courier New"/>
+            <Setter Property="FontSize"        Value="10"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+        </Style>
+        <Style Selector="Button.rawbtn:pointerover /template/ ContentPresenter">
             <Setter Property="Foreground" Value="#4fc3f7"/>
         </Style>
         <Style Selector="TabItem">
@@ -108,6 +142,13 @@
             <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="Margin"     Value="0,0,0,6"/>
         </Style>
+        <Style Selector="TextBlock.analyzing">
+            <Setter Property="Foreground" Value="#4fc3f7"/>
+            <Setter Property="FontFamily" Value="Courier New"/>
+            <Setter Property="FontSize"   Value="10"/>
+            <Setter Property="Background" Value="#0a1520"/>
+            <Setter Property="Padding"    Value="8,3"/>
+        </Style>
     </Window.Styles>
 
     <Grid RowDefinitions="Auto,2,*">
@@ -118,163 +159,197 @@
                 BorderBrush="#121c2a"
                 BorderThickness="0,0,0,1"
                 Padding="12,8">
-            <Grid ColumnDefinitions="*,10,Auto,10,Auto,10,Auto">
-                <TextBox Grid.Column="0"
-                         Classes="address"
+            <Grid ColumnDefinitions="Auto,4,Auto,8,*,10,Auto,10,Auto,10,Auto">
+                <Button Grid.Column="0"  Classes="navbtn" Content="←"
+                        IsEnabled="{Binding SelectedTab.CanGoBack}"
+                        Click="OnGoBack" ToolTip.Tip="Voltar"/>
+                <Button Grid.Column="2"  Classes="navbtn" Content="⟳"
+                        Click="OnReload" ToolTip.Tip="Recarregar"/>
+                <TextBox Grid.Column="4" Classes="address"
                          Text="{Binding SelectedTab.CurrentUrl}"
                          Watermark="https://exemplo.com"
                          KeyDown="OnUrlKeyDown"/>
-                <ComboBox Grid.Column="2"
-                          Classes="mode"
+                <ComboBox Grid.Column="6" Classes="mode"
                           ItemsSource="{Binding ViewModes}"
                           SelectedItem="{Binding SelectedTab.ViewMode}"/>
-                <Button Grid.Column="4" Classes="go" Content="GO" Click="OnNavigate"/>
-                <Button Grid.Column="6" Classes="addtab" Content="+ TAB" Click="OnAddTab"/>
+                <Button Grid.Column="8"  Classes="go"     Content="GO"    Click="OnNavigate"/>
+                <Button Grid.Column="10" Classes="addtab" Content="+ TAB" Click="OnAddTab"/>
             </Grid>
         </Border>
 
-        <!-- LOADING BAR -->
-        <ProgressBar Grid.Row="1"
-                     IsIndeterminate="True"
-                     IsVisible="{Binding SelectedTab.IsLoading}"
-                     Foreground="#1565c0"
-                     Background="Transparent"/>
+        <!-- PROGRESS -->
+        <Grid Grid.Row="1">
+            <ProgressBar IsIndeterminate="True"
+                         IsVisible="{Binding SelectedTab.IsLoading}"
+                         Foreground="#1565c0" Background="Transparent"/>
+            <ProgressBar IsIndeterminate="True"
+                         IsVisible="{Binding SelectedTab.IsAnalyzing}"
+                         Foreground="#00838f" Background="Transparent"/>
+        </Grid>
 
-        <!-- TABS -->
-        <TabControl Grid.Row="2"
-                    ItemsSource="{Binding Tabs}"
-                    SelectedItem="{Binding SelectedTab}"
-                    Background="#080b10">
+        <!-- AREA PRINCIPAL: TabControl + WebViewHost sobrepostos -->
+        <Grid Grid.Row="2">
 
-            <TabControl.ItemTemplate>
-                <DataTemplate x:DataType="models:BrowserTab">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <TextBlock Text="{Binding Title}"
-                                   MaxWidth="130"
-                                   TextTrimming="CharacterEllipsis"
-                                   VerticalAlignment="Center"/>
-                        <Button Classes="closetab" Content="×"
-                                Tag="{Binding}" Click="OnCloseTab"/>
-                    </StackPanel>
-                </DataTemplate>
-            </TabControl.ItemTemplate>
+            <!-- TabControl — renderiza Curl / Links / History / Navigator -->
+            <TabControl ItemsSource="{Binding Tabs}"
+                        SelectedItem="{Binding SelectedTab}"
+                        Background="#080b10">
 
-            <TabControl.ContentTemplate>
-                <DataTemplate x:DataType="models:BrowserTab">
-                    <Grid Background="#080b10">
+                <TabControl.ItemTemplate>
+                    <DataTemplate x:DataType="models:BrowserTab">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="{Binding Title}"
+                                       MaxWidth="130"
+                                       TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center"/>
+                            <Button Classes="closetab" Content="×"
+                                    Tag="{Binding}" Click="OnCloseTab"/>
+                        </StackPanel>
+                    </DataTemplate>
+                </TabControl.ItemTemplate>
 
-                        <!-- INTERPRETER -->
-                        <ScrollViewer Padding="14"
-                                      IsVisible="{Binding ViewMode, Converter={x:Static conv:ViewModeConverters.Interpreter}}">
-                            <Border Background="#0d1318" CornerRadius="8" Padding="14">
-                                <StackPanel Spacing="4">
-                                    <TextBlock Classes="seclabel" Text="HTML SOURCE"/>
+                <TabControl.ContentTemplate>
+                    <DataTemplate x:DataType="models:BrowserTab">
+                        <Grid Background="#080b10">
+
+                            <!-- INTERPRETER: área reservada (WebView fica no host externo) -->
+                            <Grid IsVisible="{Binding ViewMode, Converter={x:Static conv:ViewModeConverters.Interpreter}}">
+                                <!-- HTML cru sobreposto -->
+                                <ScrollViewer IsVisible="{Binding ShowRawHtml}"
+                                              Background="#080b10"
+                                              Padding="14"
+                                              ZIndex="10">
                                     <SelectableTextBlock Classes="mono"
                                                          Text="{Binding Result.Html}"
                                                          TextWrapping="Wrap"/>
+                                </ScrollViewer>
+                                <!-- Toolbar flutuante -->
+                                <StackPanel HorizontalAlignment="Right"
+                                            VerticalAlignment="Top"
+                                            Orientation="Horizontal"
+                                            Spacing="6"
+                                            Margin="0,6,12,0"
+                                            ZIndex="20">
+                                    <Button Classes="rawbtn"
+                                            Content="&lt;/&gt; HTML"
+                                            Click="OnToggleRawHtml"/>
+                                    <Border IsVisible="{Binding IsAnalyzing}"
+                                            Background="#0a1828"
+                                            CornerRadius="4"
+                                            Padding="0">
+                                        <TextBlock Classes="analyzing" Text="⟳ analisando…"/>
+                                    </Border>
                                 </StackPanel>
-                            </Border>
-                        </ScrollViewer>
+                            </Grid>
 
-                        <!-- CURL -->
-                        <ScrollViewer Padding="14"
-                                      IsVisible="{Binding ViewMode, Converter={x:Static conv:ViewModeConverters.Curl}}">
-                            <StackPanel Spacing="10">
+                            <!-- CURL -->
+                            <ScrollViewer Padding="14"
+                                          IsVisible="{Binding ViewMode, Converter={x:Static conv:ViewModeConverters.Curl}}">
+                                <StackPanel Spacing="10">
+                                    <Border Background="#0d1318" CornerRadius="8" Padding="14">
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Classes="seclabel" Text="CURL COMMAND"/>
+                                            <SelectableTextBlock Classes="mono"
+                                                                 Foreground="#80cbc4"
+                                                                 Text="{Binding Result.CurlCommand}"
+                                                                 TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Background="#0d1318" CornerRadius="8" Padding="14">
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Classes="seclabel" Text="RESPONSE HEADERS"/>
+                                            <SelectableTextBlock Classes="mono"
+                                                                 Text="{Binding Result.RequestInfo}"
+                                                                 TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </ScrollViewer>
+
+                            <!-- LINKS -->
+                            <ScrollViewer Padding="14"
+                                          IsVisible="{Binding ViewMode, Converter={x:Static conv:ViewModeConverters.Links}}">
                                 <Border Background="#0d1318" CornerRadius="8" Padding="14">
-                                    <StackPanel Spacing="4">
-                                        <TextBlock Classes="seclabel" Text="CURL COMMAND"/>
-                                        <SelectableTextBlock Classes="mono"
-                                                             Foreground="#80cbc4"
-                                                             Text="{Binding Result.CurlCommand}"
-                                                             TextWrapping="Wrap"/>
+                                    <StackPanel Spacing="6">
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Classes="seclabel" Text="EXTRACTED LINKS"
+                                                       VerticalAlignment="Center"/>
+                                            <Button Grid.Column="1" Classes="sort"
+                                                    Content="↕ TYPE" Click="OnSortLinks"/>
+                                        </Grid>
+                                        <ItemsControl ItemsSource="{Binding Result.Links}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="models:ExtractedLink">
+                                                    <Grid ColumnDefinitions="52,*" Margin="0,2">
+                                                        <Border Background="#0a1520" CornerRadius="3"
+                                                                Padding="4,2" HorizontalAlignment="Left">
+                                                            <TextBlock Text="{Binding Type}"
+                                                                       FontFamily="Courier New"
+                                                                       FontSize="9"
+                                                                       Foreground="#546e7a"/>
+                                                        </Border>
+                                                        <SelectableTextBlock Grid.Column="1"
+                                                                             Classes="link"
+                                                                             Text="{Binding Url}"
+                                                                             Margin="8,0,0,0"/>
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
                                     </StackPanel>
                                 </Border>
+                            </ScrollViewer>
+
+                            <!-- HISTORY -->
+                            <ScrollViewer Padding="14"
+                                          IsVisible="{Binding ViewMode, Converter={x:Static conv:ViewModeConverters.History}}">
                                 <Border Background="#0d1318" CornerRadius="8" Padding="14">
                                     <StackPanel Spacing="4">
-                                        <TextBlock Classes="seclabel" Text="RESPONSE HEADERS"/>
-                                        <SelectableTextBlock Classes="mono"
-                                                             Text="{Binding Result.RequestInfo}"
-                                                             TextWrapping="Wrap"/>
+                                        <TextBlock Classes="seclabel" Text="NAVIGATION HISTORY"/>
+                                        <ItemsControl ItemsSource="{Binding History}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="x:String">
+                                                    <SelectableTextBlock Classes="link"
+                                                                         Text="{Binding}"
+                                                                         Margin="0,3"/>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
                                     </StackPanel>
                                 </Border>
-                            </StackPanel>
-                        </ScrollViewer>
+                            </ScrollViewer>
 
-                        <!-- LINKS -->
-                        <ScrollViewer Padding="14"
-                                      IsVisible="{Binding ViewMode, Converter={x:Static conv:ViewModeConverters.Links}}">
-                            <Border Background="#0d1318" CornerRadius="8" Padding="14">
-                                <StackPanel Spacing="6">
-                                    <Grid ColumnDefinitions="*,Auto">
-                                        <TextBlock Classes="seclabel" Text="EXTRACTED LINKS" VerticalAlignment="Center"/>
-                                        <Button Grid.Column="1" Classes="sort" Content="↕ TYPE" Click="OnSortLinks"/>
-                                    </Grid>
-                                    <ItemsControl ItemsSource="{Binding Result.Links}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate x:DataType="models:ExtractedLink">
-                                                <Grid ColumnDefinitions="52,*" Margin="0,2">
-                                                    <Border Background="#0a1520" CornerRadius="3"
-                                                            Padding="4,2" HorizontalAlignment="Left">
-                                                        <TextBlock Text="{Binding Type}"
-                                                                   FontFamily="Courier New"
-                                                                   FontSize="9"
-                                                                   Foreground="#546e7a"/>
-                                                    </Border>
-                                                    <SelectableTextBlock Grid.Column="1"
-                                                                         Classes="link"
-                                                                         Text="{Binding Url}"
-                                                                         Margin="8,0,0,0"/>
-                                                </Grid>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </StackPanel>
-                            </Border>
-                        </ScrollViewer>
+                            <!-- NAVIGATOR -->
+                            <Grid IsVisible="{Binding ViewMode, Converter={x:Static conv:ViewModeConverters.Navigator}}">
+                                <Border Background="#060a0f">
+                                    <controls:GraphCanvas x:Name="TheGraph"
+                                                          Nodes="{Binding GraphNodes}"/>
+                                </Border>
+                                <controls:InfoPanel Result="{Binding Result}"
+                                                    HorizontalAlignment="Stretch"
+                                                    VerticalAlignment="Stretch"/>
+                            </Grid>
 
-                        <!-- HISTORY -->
-                        <ScrollViewer Padding="14"
-                                      IsVisible="{Binding ViewMode, Converter={x:Static conv:ViewModeConverters.History}}">
-                            <Border Background="#0d1318" CornerRadius="8" Padding="14">
-                                <StackPanel Spacing="4">
-                                    <TextBlock Classes="seclabel" Text="NAVIGATION HISTORY"/>
-                                    <ItemsControl ItemsSource="{Binding History}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate x:DataType="x:String">
-                                                <SelectableTextBlock Classes="link"
-                                                                     Text="{Binding}"
-                                                                     Margin="0,3"/>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </StackPanel>
-                            </Border>
-                        </ScrollViewer>
-
-                        <!-- NAVIGATOR: GraphCanvas + InfoPanel sobrepostos -->
-                        <Grid IsVisible="{Binding ViewMode, Converter={x:Static conv:ViewModeConverters.Navigator}}">
-
-                            <!-- Grafo ocupa todo o espaço — recebe mouse normalmente -->
-                            <Border Background="#060a0f">
-                                <controls:GraphCanvas x:Name="TheGraph"
-                                                      Nodes="{Binding GraphNodes}"/>
-                            </Border>
-
-                            <!-- InfoPanel flutua no canto superior direito.
-                                 IsHitTestVisible=True (padrão) para receber
-                                 eventos de resize e scroll do próprio painel.
-                                 Eventos FORA do painel passam ao GraphCanvas
-                                 porque o InfoPanel só consume eventos dentro
-                                 de sua área visual (IsInsidePanel). -->
-                            <controls:InfoPanel Result="{Binding Result}"
-                                                HorizontalAlignment="Stretch"
-                                                VerticalAlignment="Stretch"/>
                         </Grid>
+                    </DataTemplate>
+                </TabControl.ContentTemplate>
 
-                    </Grid>
-                </DataTemplate>
-            </TabControl.ContentTemplate>
+            </TabControl>
 
-        </TabControl>
+            <!--
+                WebViewHost — fora do ContentTemplate, único na árvore visual.
+                Fica sobre o TabControl mas abaixo da tab strip (~40px).
+                O code-behind adiciona/remove/mostra os WebViews aqui.
+            -->
+            <Panel x:Name="WebViewHost"
+                   IsVisible="{Binding SelectedTab.ViewMode,
+                               Converter={x:Static conv:ViewModeConverters.Interpreter}}"
+                   Margin="0,40,0,0"
+                   HorizontalAlignment="Stretch"
+                   VerticalAlignment="Stretch"
+                   ZIndex="5"/>
+
+        </Grid>
+
     </Grid>
 </Window>

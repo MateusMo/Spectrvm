@@ -1,5 +1,6 @@
 namespace Spectrvm.Models;
 
+
 public enum ViewMode
 {
     Interpreter,

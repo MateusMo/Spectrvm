@@ -2,6 +2,7 @@ using System;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.VisualTree;
+using WebViewControl;
 using ReactiveUI;
 using Spectrvm.Controls;
 using Spectrvm.Models;
@@ -11,16 +12,61 @@ namespace Spectrvm.Views;
 
 public partial class MainWindow : Avalonia.Controls.Window
 {
+    private Panel? _webViewHost;
+
     public MainWindow()
     {
         InitializeComponent();
-        DataContext = new MainWindowViewModel();
+        var vm = new MainWindowViewModel { Window = this };
+        DataContext = vm;
+
+        this.Loaded += (_, _) =>
+        {
+            WireWebViewHost();
+            vm.InitFirstTab();
+            WireGraphCanvas();
+        };
+
         LayoutUpdated += (_, _) => WireGraphCanvas();
     }
 
+    // ── WebView host ──────────────────────────────────────────────────────────
+
+    private void WireWebViewHost()
+    {
+        if (_webViewHost != null) return;
+        _webViewHost = this.FindControl<Panel>("WebViewHost");
+    }
+
+    public void SwitchWebView(BrowserTab? tab)
+    {
+        if (_webViewHost == null) WireWebViewHost();
+        if (_webViewHost == null) return;
+
+        if (tab?.WebViewInstance != null &&
+            !_webViewHost.Children.Contains(tab.WebViewInstance))
+            _webViewHost.Children.Add(tab.WebViewInstance);
+
+        foreach (var child in _webViewHost.Children)
+        {
+            if (child is WebView wv)
+                wv.IsVisible = tab?.WebViewInstance == wv;
+        }
+    }
+
+    public void RemoveWebView(BrowserTab tab)
+    {
+        if (tab.WebViewInstance == null || _webViewHost == null) return;
+        _webViewHost.Children.Remove(tab.WebViewInstance);
+        tab.WebViewInstance = null;
+    }
+
+    // ── Barra de endereço ─────────────────────────────────────────────────────
+
     private async void OnNavigate(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        if (DataContext is MainWindowViewModel vm) await vm.NavigateAsync();
+        if (DataContext is MainWindowViewModel vm)
+            await vm.NavigateAsync();
     }
 
     private async void OnUrlKeyDown(object? sender, KeyEventArgs e)
@@ -46,6 +92,28 @@ public partial class MainWindow : Avalonia.Controls.Window
         if (DataContext is MainWindowViewModel vm) vm.SortLinks();
     }
 
+    // ── Voltar / Reload ───────────────────────────────────────────────────────
+
+    private void OnGoBack(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm) vm.GoBack();
+    }
+
+    private async void OnReload(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm)
+            await vm.ReloadAsync();
+    }
+
+    // ── Toggle HTML cru ───────────────────────────────────────────────────────
+
+    private void OnToggleRawHtml(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm) vm.ToggleRawHtml();
+    }
+
+    // ── GraphCanvas ───────────────────────────────────────────────────────────
+
     private GraphCanvas? _wiredCanvas;
     private IDisposable? _tabSub;
     private IDisposable? _nodesSub;
@@ -56,7 +124,6 @@ public partial class MainWindow : Avalonia.Controls.Window
         if (canvas == null || ReferenceEquals(canvas, _wiredCanvas)) return;
         _wiredCanvas = canvas;
 
-        // Sincroniza canvas.Edges quando a aba selecionada ou seus nós mudam
         if (DataContext is MainWindowViewModel vm)
         {
             _tabSub?.Dispose();
@@ -64,9 +131,7 @@ public partial class MainWindow : Avalonia.Controls.Window
             {
                 _nodesSub?.Dispose();
                 if (tab == null) return;
-
                 canvas.Edges = tab.GraphEdges;
-
                 _nodesSub = tab.WhenAnyValue(t => t.GraphNodes).Subscribe(_ =>
                 {
                     canvas.Edges = tab.GraphEdges;
@@ -75,14 +140,12 @@ public partial class MainWindow : Avalonia.Controls.Window
             });
         }
 
-        // Clique em nó orbital → linha de navegação do orbital para o novo primário
         canvas.OnNodeClicked = async (url, node) =>
         {
             if (DataContext is MainWindowViewModel vm2)
                 await vm2.NavigateToUrl(url, node);
         };
 
-        // Clique em ⊕ → expansão atômica (todos os orbitais em paralelo)
         canvas.OnAtomicExpand = async (primaryNode) =>
         {
             if (DataContext is not MainWindowViewModel vm2) return;
